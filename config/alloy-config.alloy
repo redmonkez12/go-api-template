@@ -1,0 +1,92 @@
+// Grafana Alloy configuration for log collection
+// Replaces the deprecated Promtail agent
+
+// Loki write endpoint
+loki.write "default" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+  }
+}
+
+// Discover Docker containers
+discovery.docker "containers" {
+  host = "unix:///var/run/docker.sock"
+  refresh_interval = "5s"
+
+  filter {
+    name   = "label"
+    values = ["logging=promtail"]
+  }
+}
+
+// Relabel discovered containers
+discovery.relabel "docker" {
+  targets = discovery.docker.containers.targets
+
+  // Extract container name
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    regex         = "/(.*)"
+    target_label  = "container"
+  }
+
+  // Extract container ID
+  rule {
+    source_labels = ["__meta_docker_container_id"]
+    target_label  = "container_id"
+  }
+
+  // Add compose project
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_project"]
+    target_label  = "compose_project"
+  }
+
+  // Add compose service
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+    target_label  = "compose_service"
+  }
+}
+
+// Read logs from Docker containers
+loki.source.docker "containers" {
+  host             = "unix:///var/run/docker.sock"
+  targets          = discovery.relabel.docker.output
+  forward_to       = [loki.process.parse_json.receiver]
+  refresh_interval = "5s"
+}
+
+// Process and parse JSON logs
+loki.process "parse_json" {
+  forward_to = [loki.write.default.receiver]
+
+  // Parse JSON log entries
+  stage.json {
+    expressions = {
+      level       = "level",
+      msg         = "msg",
+      time        = "time",
+      request_id  = "request_id",
+      method      = "method",
+      path        = "path",
+      status      = "status",
+      duration_ms = "duration_ms",
+      user_id     = "user_id",
+      email       = "email",
+    }
+  }
+
+  // Add level as a label for easier filtering
+  stage.labels {
+    values = {
+      level = "",
+    }
+  }
+
+  // Use the timestamp from the log entry
+  stage.timestamp {
+    source = "time"
+    format = "RFC3339"
+  }
+}

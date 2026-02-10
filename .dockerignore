@@ -1,0 +1,53 @@
+# Git files
+.git
+.gitignore
+
+# Environment files (use secrets management in production)
+.env
+.env.local
+.env.*.local
+
+# Development and build artifacts
+bin/
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Test files
+*_test.go
+testdata/
+coverage.out
+coverage.html
+
+# Documentation
+README.md
+*.md
+docs/*.md
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Docker files
+Dockerfile
+.dockerignore
+docker-compose.yml
+docker-compose.*.yml
+
+# CI/CD
+.github/
+.gitlab-ci.yml
+
+# Scripts
+test-api.sh
+scripts/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
