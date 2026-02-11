@@ -13,9 +13,7 @@ setup: ## First-time project setup (tools, Docker, migrations, Swagger)
 	@echo "==> Downloading dependencies..."
 	@$(MAKE) deps
 	@echo "==> Starting Docker containers..."
-	@$(MAKE) docker-up
-	@echo "==> Waiting for services to be ready..."
-	@sleep 5
+	@docker compose up -d --wait
 {{if .IsSQL}}	@echo "==> Running migrations..."
 	@$(MAKE) migrate-up
 {{end}}	@echo "==> Generating Swagger docs..."
