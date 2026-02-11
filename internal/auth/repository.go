@@ -10,7 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/uptrace/bun"
 
-	"go-api-template/internal/database"
+	"github.com/redmonkez12/go-api-template/internal/database"
 )
 
 // Repository handles refresh token persistence

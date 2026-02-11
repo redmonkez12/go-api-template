@@ -7,7 +7,7 @@ import (
 	"html/template"
 	"net/smtp"
 
-	"go-api-template/internal/logging"
+	"github.com/redmonkez12/go-api-template/internal/logging"
 )
 
 type Service struct {

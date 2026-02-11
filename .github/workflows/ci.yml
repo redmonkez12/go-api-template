@@ -24,7 +24,7 @@ jobs:
         run: go build ./cmd/api/...
 
       - name: Build CLI
-        run: go build ./cmd/cli/...
+        run: go build ./cmd/create-go-api/...
 
       - name: Run tests
         run: go test -race ./...
@@ -65,7 +65,7 @@ jobs:
           go-version: "1.25"
 
       - name: Build CLI
-        run: go build -o bin/create-go-api ./cmd/cli/
+        run: go build -o bin/create-go-api ./cmd/create-go-api/
 
       - name: Generate project
         run: |

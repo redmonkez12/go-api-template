@@ -1,4 +1,4 @@
-module go-api-template
+module github.com/redmonkez12/go-api-template
 
 go 1.25.6
 

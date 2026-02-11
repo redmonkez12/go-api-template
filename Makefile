@@ -13,7 +13,7 @@ build: ## Build the application
 	go build -o bin/api cmd/api/main.go
 
 build-cli: ## Build the CLI scaffolding tool
-	go build -o bin/create-go-api cmd/cli/main.go
+	go build -o bin/create-go-api cmd/create-go-api/main.go
 
 test: ## Run tests
 	go test -v -race -coverprofile=coverage.out ./...

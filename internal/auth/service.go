@@ -13,8 +13,8 @@ import (
 
 	"github.com/google/uuid"
 	"golang.org/x/crypto/argon2"
-	"go-api-template/internal/logging"
-	"go-api-template/internal/user"
+	"github.com/redmonkez12/go-api-template/internal/logging"
+	"github.com/redmonkez12/go-api-template/internal/user"
 )
 
 var (

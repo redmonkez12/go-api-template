@@ -14,14 +14,14 @@ import (
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/dialect/pgdialect"
 
-	_ "go-api-template/docs" // Swagger docs (generated)
-	"go-api-template/internal/auth"
-	"go-api-template/internal/config"
-	"go-api-template/internal/email"
-	httpServer "go-api-template/internal/http"
-	"go-api-template/internal/logging"
-	"go-api-template/internal/ratelimit"
-	"go-api-template/internal/user"
+	_ "github.com/redmonkez12/go-api-template/docs" // Swagger docs (generated)
+	"github.com/redmonkez12/go-api-template/internal/auth"
+	"github.com/redmonkez12/go-api-template/internal/config"
+	"github.com/redmonkez12/go-api-template/internal/email"
+	httpServer "github.com/redmonkez12/go-api-template/internal/http"
+	"github.com/redmonkez12/go-api-template/internal/logging"
+	"github.com/redmonkez12/go-api-template/internal/ratelimit"
+	"github.com/redmonkez12/go-api-template/internal/user"
 )
 
 // @title           Go API Template

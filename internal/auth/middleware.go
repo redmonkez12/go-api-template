@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"strings"
 
-	"go-api-template/internal/httputil"
+	"github.com/redmonkez12/go-api-template/internal/httputil"
 
 	"github.com/google/uuid"
 )

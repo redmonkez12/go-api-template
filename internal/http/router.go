@@ -4,10 +4,10 @@ import (
 	"log"
 	"net/http"
 
-	"go-api-template/internal/auth"
-	"go-api-template/internal/config"
-	"go-api-template/internal/httputil"
-	"go-api-template/internal/logging"
+	"github.com/redmonkez12/go-api-template/internal/auth"
+	"github.com/redmonkez12/go-api-template/internal/config"
+	"github.com/redmonkez12/go-api-template/internal/httputil"
+	"github.com/redmonkez12/go-api-template/internal/logging"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"

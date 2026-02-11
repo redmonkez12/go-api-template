@@ -8,10 +8,10 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"go-api-template/internal/httputil"
-	"go-api-template/internal/logging"
-	"go-api-template/internal/ratelimit"
-	"go-api-template/internal/user"
+	"github.com/redmonkez12/go-api-template/internal/httputil"
+	"github.com/redmonkez12/go-api-template/internal/logging"
+	"github.com/redmonkez12/go-api-template/internal/ratelimit"
+	"github.com/redmonkez12/go-api-template/internal/user"
 )
 
 // Handler contains HTTP handlers for authentication endpoints
