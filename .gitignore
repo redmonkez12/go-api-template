@@ -5,6 +5,8 @@
 *.dylib
 bin/
 dist/
+/api
+/create-go-api
 
 # Test coverage
 *.out
