@@ -1,0 +1,92 @@
+package auth
+
+import (
+	"errors"
+	"fmt"
+	"time"
+
+	"github.com/golang-jwt/jwt/v5"
+	"github.com/google/uuid"
+)
+
+var (
+	ErrInvalidToken = errors.New("invalid token")
+	ErrExpiredToken = errors.New("token has expired")
+)
+
+// TokenClaims represents the claims stored in a JWT token
+type TokenClaims struct {
+	UserID    string    `json:"user_id"`
+	Email     string    `json:"email"`
+	IssuedAt  time.Time `json:"iat"`
+	ExpiresAt time.Time `json:"exp"`
+}
+
+// jwtCustomClaims wraps TokenClaims with jwt.RegisteredClaims for the JWT library
+type jwtCustomClaims struct {
+	UserID string `json:"user_id"`
+	Email  string `json:"email"`
+	jwt.RegisteredClaims
+}
+
+// JWTService handles JWT token creation and validation using HS256
+type JWTService struct {
+	secret []byte
+}
+
+func NewJWTService(secret string) *JWTService {
+	return &JWTService{
+		secret: []byte(secret),
+	}
+}
+
+// CreateToken generates a new JWT token with the given claims and duration
+func (s *JWTService) CreateToken(userID uuid.UUID, email string, duration time.Duration) (string, error) {
+	now := time.Now()
+
+	claims := jwtCustomClaims{
+		UserID: userID.String(),
+		Email:  email,
+		RegisteredClaims: jwt.RegisteredClaims{
+			IssuedAt:  jwt.NewNumericDate(now),
+			ExpiresAt: jwt.NewNumericDate(now.Add(duration)),
+		},
+	}
+
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	signed, err := token.SignedString(s.secret)
+	if err != nil {
+		return "", fmt.Errorf("failed to sign token: %w", err)
+	}
+
+	return signed, nil
+}
+
+// VerifyToken validates a JWT token and returns the claims
+func (s *JWTService) VerifyToken(tokenStr string) (*TokenClaims, error) {
+	token, err := jwt.ParseWithClaims(tokenStr, &jwtCustomClaims{}, func(token *jwt.Token) (any, error) {
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
+		}
+		return s.secret, nil
+	})
+
+	if err != nil {
+		if errors.Is(err, jwt.ErrTokenExpired) {
+			return nil, ErrExpiredToken
+		}
+		return nil, ErrInvalidToken
+	}
+
+	claims, ok := token.Claims.(*jwtCustomClaims)
+	if !ok || !token.Valid {
+		return nil, ErrInvalidToken
+	}
+
+	return &TokenClaims{
+		UserID:    claims.UserID,
+		Email:     claims.Email,
+		IssuedAt:  claims.IssuedAt.Time,
+		ExpiresAt: claims.ExpiresAt.Time,
+	}, nil
+}

@@ -1,0 +1,220 @@
+package user
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"time"
+
+	"github.com/google/uuid"
+	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
+)
+
+// mongoUser represents the user document structure in MongoDB.
+type mongoUser struct {
+	ID                      string     `bson:"_id"`
+	Email                   string     `bson:"email"`
+	PasswordHash            string     `bson:"password_hash"`
+	EmailVerified           bool       `bson:"email_verified"`
+	EmailVerificationToken  *string    `bson:"email_verification_token,omitempty"`
+	EmailVerificationSentAt *time.Time `bson:"email_verification_sent_at,omitempty"`
+	CreatedAt               time.Time  `bson:"created_at"`
+	UpdatedAt               time.Time  `bson:"updated_at"`
+}
+
+// Repository implements the RepositoryInterface using MongoDB.
+type Repository struct {
+	db *mongo.Database
+}
+
+// NewRepository creates a new MongoDB user repository.
+func NewRepository(db *mongo.Database) *Repository {
+	return &Repository{db: db}
+}
+
+// collection returns the users collection.
+func (r *Repository) collection() *mongo.Collection {
+	return r.db.Collection("users")
+}
+
+// Create creates a new user with the given email, password hash, and verification token.
+func (r *Repository) Create(ctx context.Context, email, passwordHash, verificationToken string) (*User, error) {
+	now := time.Now()
+	id := uuid.New()
+
+	doc := mongoUser{
+		ID:                      id.String(),
+		Email:                   email,
+		PasswordHash:            passwordHash,
+		EmailVerified:           false,
+		EmailVerificationToken:  &verificationToken,
+		EmailVerificationSentAt: &now,
+		CreatedAt:               now,
+		UpdatedAt:               now,
+	}
+
+	_, err := r.collection().InsertOne(ctx, doc)
+	if err != nil {
+		// Check for duplicate key error (email already exists)
+		if mongo.IsDuplicateKeyError(err) {
+			return nil, ErrDuplicateEmail
+		}
+		return nil, fmt.Errorf("failed to insert user: %w", err)
+	}
+
+	return mapMongoUserToModel(&doc), nil
+}
+
+// GetByEmail retrieves a user by their email address.
+func (r *Repository) GetByEmail(ctx context.Context, email string) (*User, error) {
+	var doc mongoUser
+	err := r.collection().FindOne(ctx, bson.M{"email": email}).Decode(&doc)
+	if err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("failed to find user by email: %w", err)
+	}
+
+	return mapMongoUserToModel(&doc), nil
+}
+
+// GetByID retrieves a user by their ID.
+func (r *Repository) GetByID(ctx context.Context, id uuid.UUID) (*User, error) {
+	var doc mongoUser
+	err := r.collection().FindOne(ctx, bson.M{"_id": id.String()}).Decode(&doc)
+	if err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("failed to find user by ID: %w", err)
+	}
+
+	return mapMongoUserToModel(&doc), nil
+}
+
+// GetByVerificationToken retrieves a user by their verification token.
+// Only returns users who have not yet verified their email.
+func (r *Repository) GetByVerificationToken(ctx context.Context, token string) (*User, error) {
+	var doc mongoUser
+	filter := bson.M{
+		"email_verification_token": token,
+		"email_verified":           false,
+	}
+	err := r.collection().FindOne(ctx, filter).Decode(&doc)
+	if err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("failed to find user by verification token: %w", err)
+	}
+
+	return mapMongoUserToModel(&doc), nil
+}
+
+// CheckIfTokenAlreadyUsed checks if a verification token has already been used.
+// Returns true if the token exists for a user who has already verified their email.
+func (r *Repository) CheckIfTokenAlreadyUsed(ctx context.Context, token string) (bool, error) {
+	filter := bson.M{
+		"email_verification_token": token,
+		"email_verified":           true,
+	}
+	count, err := r.collection().CountDocuments(ctx, filter)
+	if err != nil {
+		return false, fmt.Errorf("failed to check if token already used: %w", err)
+	}
+
+	return count > 0, nil
+}
+
+// MarkEmailAsVerified marks a user's email as verified and clears the verification token.
+func (r *Repository) MarkEmailAsVerified(ctx context.Context, userID uuid.UUID) error {
+	filter := bson.M{"_id": userID.String()}
+	update := bson.M{
+		"$set": bson.M{
+			"email_verified": true,
+			"updated_at":     time.Now(),
+		},
+		"$unset": bson.M{
+			"email_verification_token":  "",
+			"email_verification_sent_at": "",
+		},
+	}
+
+	result, err := r.collection().UpdateOne(ctx, filter, update)
+	if err != nil {
+		return fmt.Errorf("failed to mark email as verified: %w", err)
+	}
+
+	if result.MatchedCount == 0 {
+		return ErrNotFound
+	}
+
+	return nil
+}
+
+// UpdatePassword updates a user's password hash.
+func (r *Repository) UpdatePassword(ctx context.Context, userID uuid.UUID, passwordHash string) error {
+	filter := bson.M{"_id": userID.String()}
+	update := bson.M{
+		"$set": bson.M{
+			"password_hash": passwordHash,
+			"updated_at":    time.Now(),
+		},
+	}
+
+	result, err := r.collection().UpdateOne(ctx, filter, update)
+	if err != nil {
+		return fmt.Errorf("failed to update password: %w", err)
+	}
+
+	if result.MatchedCount == 0 {
+		return ErrNotFound
+	}
+
+	return nil
+}
+
+// UpdateVerificationToken updates a user's verification token.
+// Only updates if the email is not yet verified.
+func (r *Repository) UpdateVerificationToken(ctx context.Context, userID uuid.UUID, token string) error {
+	now := time.Now()
+	filter := bson.M{
+		"_id":            userID.String(),
+		"email_verified": false,
+	}
+	update := bson.M{
+		"$set": bson.M{
+			"email_verification_token":  token,
+			"email_verification_sent_at": now,
+			"updated_at":                now,
+		},
+	}
+
+	result, err := r.collection().UpdateOne(ctx, filter, update)
+	if err != nil {
+		return fmt.Errorf("failed to update verification token: %w", err)
+	}
+
+	if result.MatchedCount == 0 {
+		return ErrNotFound
+	}
+
+	return nil
+}
+
+// mapMongoUserToModel converts a MongoDB user document to the domain User model.
+func mapMongoUserToModel(doc *mongoUser) *User {
+	id, _ := uuid.Parse(doc.ID)
+	return &User{
+		ID:                      id,
+		Email:                   doc.Email,
+		PasswordHash:            doc.PasswordHash,
+		EmailVerified:           doc.EmailVerified,
+		EmailVerificationToken:  doc.EmailVerificationToken,
+		EmailVerificationSentAt: doc.EmailVerificationSentAt,
+		CreatedAt:               doc.CreatedAt,
+		UpdatedAt:               doc.UpdatedAt,
+	}
+}

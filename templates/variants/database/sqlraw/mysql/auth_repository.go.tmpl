@@ -1,0 +1,129 @@
+package auth
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+	"fmt"
+	"time"
+
+	"github.com/google/uuid"
+)
+
+// RefreshTokenRepo implements RefreshTokenRepository using raw SQL.
+type RefreshTokenRepo struct {
+	db *sql.DB
+}
+
+// NewRefreshTokenRepository creates a new raw SQL refresh token repository.
+func NewRefreshTokenRepository(db *sql.DB) *RefreshTokenRepo {
+	return &RefreshTokenRepo{db: db}
+}
+
+func (r *RefreshTokenRepo) StoreRefreshToken(ctx context.Context, userID uuid.UUID, token string, expiresAt time.Time) error {
+	tokenHash := hashToken(token)
+	query := `
+		INSERT INTO refresh_tokens (user_id, token_hash, expires_at, created_at)
+		VALUES (?, ?, ?, ?)
+	`
+
+	_, err := r.db.ExecContext(ctx, query, userID.String(), tokenHash, expiresAt, time.Now())
+	if err != nil {
+		return fmt.Errorf("failed to store refresh token: %w", err)
+	}
+
+	return nil
+}
+
+func (r *RefreshTokenRepo) GetRefreshToken(ctx context.Context, token string) (*RefreshToken, error) {
+	tokenHash := hashToken(token)
+	query := `
+		SELECT id, user_id, token_hash, expires_at, created_at, revoked_at
+		FROM refresh_tokens
+		WHERE token_hash = ?
+	`
+
+	var rt RefreshToken
+	var userIDStr string
+	var revokedAt sql.NullTime
+
+	err := r.db.QueryRowContext(ctx, query, tokenHash).Scan(
+		&rt.ID,
+		&userIDStr,
+		&rt.TokenHash,
+		&rt.ExpiresAt,
+		&rt.CreatedAt,
+		&revokedAt,
+	)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrRefreshTokenNotFound
+		}
+		return nil, fmt.Errorf("failed to get refresh token: %w", err)
+	}
+
+	rt.UserID, err = uuid.Parse(userIDStr)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse user ID: %w", err)
+	}
+
+	if revokedAt.Valid {
+		rt.RevokedAt = &revokedAt.Time
+	}
+
+	return &rt, nil
+}
+
+func (r *RefreshTokenRepo) RevokeRefreshToken(ctx context.Context, token string) error {
+	tokenHash := hashToken(token)
+	query := `
+		UPDATE refresh_tokens
+		SET revoked_at = ?
+		WHERE token_hash = ? AND revoked_at IS NULL
+	`
+
+	result, err := r.db.ExecContext(ctx, query, time.Now(), tokenHash)
+	if err != nil {
+		return fmt.Errorf("failed to revoke refresh token: %w", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to get rows affected: %w", err)
+	}
+
+	if rowsAffected == 0 {
+		return ErrRefreshTokenNotFound
+	}
+
+	return nil
+}
+
+func (r *RefreshTokenRepo) RevokeAllUserTokens(ctx context.Context, userID uuid.UUID) error {
+	query := `
+		UPDATE refresh_tokens
+		SET revoked_at = ?
+		WHERE user_id = ? AND revoked_at IS NULL
+	`
+
+	_, err := r.db.ExecContext(ctx, query, time.Now(), userID.String())
+	if err != nil {
+		return fmt.Errorf("failed to revoke all user tokens: %w", err)
+	}
+
+	return nil
+}
+
+func (r *RefreshTokenRepo) CleanupExpiredTokens(ctx context.Context) error {
+	query := `
+		DELETE FROM refresh_tokens
+		WHERE expires_at < ? OR revoked_at IS NOT NULL
+	`
+
+	_, err := r.db.ExecContext(ctx, query, time.Now())
+	if err != nil {
+		return fmt.Errorf("failed to cleanup expired tokens: %w", err)
+	}
+
+	return nil
+}

@@ -1,0 +1,52 @@
+package database
+
+import (
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/uptrace/bun"
+)
+
+// User represents a user in the database
+type User struct {
+	bun.BaseModel `bun:"table:users,alias:u"`
+
+	ID                        uuid.UUID  `bun:"id,pk,type:uuid,default:gen_random_uuid()" json:"id"`
+	Email                     string     `bun:"email,notnull,unique" json:"email"`
+	PasswordHash              string     `bun:"password_hash,notnull" json:"-"`
+	EmailVerified             bool       `bun:"email_verified,notnull,default:false" json:"email_verified"`
+	EmailVerificationToken    *string    `bun:"email_verification_token" json:"-"`
+	EmailVerificationSentAt   *time.Time `bun:"email_verification_sent_at" json:"-"`
+	CreatedAt                 time.Time  `bun:"created_at,notnull,default:current_timestamp" json:"created_at"`
+	UpdatedAt                 time.Time  `bun:"updated_at,notnull,default:current_timestamp" json:"updated_at"`
+}
+
+// RefreshToken represents a refresh token in the database
+type RefreshToken struct {
+	bun.BaseModel `bun:"table:refresh_tokens,alias:rt"`
+
+	ID        int64      `bun:"id,pk,autoincrement" json:"id"`
+	UserID    uuid.UUID  `bun:"user_id,notnull,type:uuid" json:"user_id"`
+	TokenHash string     `bun:"token_hash,notnull,unique" json:"-"`
+	ExpiresAt time.Time  `bun:"expires_at,notnull" json:"expires_at"`
+	CreatedAt time.Time  `bun:"created_at,notnull,default:current_timestamp" json:"created_at"`
+	RevokedAt *time.Time `bun:"revoked_at" json:"revoked_at,omitempty"`
+
+	// Relations
+	User *User `bun:"rel:belongs-to,join:user_id=id"`
+}
+
+// IsRevoked checks if the refresh token has been revoked
+func (rt *RefreshToken) IsRevoked() bool {
+	return rt.RevokedAt != nil
+}
+
+// IsExpired checks if the refresh token has expired
+func (rt *RefreshToken) IsExpired() bool {
+	return time.Now().After(rt.ExpiresAt)
+}
+
+// IsValid checks if the refresh token is valid (not revoked and not expired)
+func (rt *RefreshToken) IsValid() bool {
+	return !rt.IsRevoked() && !rt.IsExpired()
+}

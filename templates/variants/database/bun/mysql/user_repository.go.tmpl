@@ -1,0 +1,213 @@
+package user
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+	"strings"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/uptrace/bun"
+
+	"go-api-template/internal/database"
+)
+
+// Repository handles user data persistence using Bun ORM.
+type Repository struct {
+	db *bun.DB
+}
+
+// NewRepository creates a new Bun-based user repository.
+func NewRepository(db *bun.DB) *Repository {
+	return &Repository{db: db}
+}
+
+// mapDBUserToModel converts database.User to user.User
+func mapDBUserToModel(dbUser *database.User) *User {
+	return &User{
+		ID:                      uuid.MustParse(dbUser.ID),
+		Email:                   dbUser.Email,
+		PasswordHash:            dbUser.PasswordHash,
+		EmailVerified:           dbUser.EmailVerified,
+		EmailVerificationToken:  dbUser.EmailVerificationToken,
+		EmailVerificationSentAt: dbUser.EmailVerificationSentAt,
+		CreatedAt:               dbUser.CreatedAt,
+		UpdatedAt:               dbUser.UpdatedAt,
+	}
+}
+
+// Create creates a new user
+func (r *Repository) Create(ctx context.Context, email, passwordHash, verificationToken string) (*User, error) {
+	dbUser := &database.User{
+		ID:                     uuid.New().String(),
+		Email:                  email,
+		PasswordHash:           passwordHash,
+		EmailVerificationToken: &verificationToken,
+		EmailVerified:          false,
+		CreatedAt:              time.Now(),
+		UpdatedAt:              time.Now(),
+	}
+
+	_, err := r.db.NewInsert().
+		Model(dbUser).
+		Exec(ctx)
+
+	if err != nil {
+		// MySQL duplicate key error check
+		if strings.Contains(err.Error(), "Duplicate entry") {
+			return nil, ErrDuplicateEmail
+		}
+		return nil, err
+	}
+
+	return mapDBUserToModel(dbUser), nil
+}
+
+// GetByEmail retrieves a user by email
+func (r *Repository) GetByEmail(ctx context.Context, email string) (*User, error) {
+	var dbUser database.User
+	err := r.db.NewSelect().
+		Model(&dbUser).
+		Where("email = ?", email).
+		Scan(ctx)
+
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+
+	return mapDBUserToModel(&dbUser), nil
+}
+
+// GetByID retrieves a user by ID
+func (r *Repository) GetByID(ctx context.Context, id uuid.UUID) (*User, error) {
+	var dbUser database.User
+	err := r.db.NewSelect().
+		Model(&dbUser).
+		Where("id = ?", id.String()).
+		Scan(ctx)
+
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+
+	return mapDBUserToModel(&dbUser), nil
+}
+
+// GetByVerificationToken retrieves a user by verification token
+func (r *Repository) GetByVerificationToken(ctx context.Context, token string) (*User, error) {
+	var dbUser database.User
+	err := r.db.NewSelect().
+		Model(&dbUser).
+		Where("email_verification_token = ?", token).
+		Where("email_verified = ?", false).
+		Scan(ctx)
+
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+
+	return mapDBUserToModel(&dbUser), nil
+}
+
+// CheckIfTokenAlreadyUsed checks if a verification token has already been used
+func (r *Repository) CheckIfTokenAlreadyUsed(ctx context.Context, token string) (bool, error) {
+	count, err := r.db.NewSelect().
+		Model((*database.User)(nil)).
+		Where("email_verification_token = ?", token).
+		Where("email_verified = ?", true).
+		Count(ctx)
+
+	if err != nil {
+		return false, err
+	}
+
+	return count > 0, nil
+}
+
+// MarkEmailAsVerified marks a user's email as verified
+func (r *Repository) MarkEmailAsVerified(ctx context.Context, userID uuid.UUID) error {
+	result, err := r.db.NewUpdate().
+		Model((*database.User)(nil)).
+		Set("email_verified = ?", true).
+		Set("email_verification_token = ?", nil).
+		Set("updated_at = ?", time.Now()).
+		Where("id = ?", userID.String()).
+		Exec(ctx)
+
+	if err != nil {
+		return err
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+
+	if rowsAffected == 0 {
+		return ErrNotFound
+	}
+
+	return nil
+}
+
+// UpdatePassword updates a user's password
+func (r *Repository) UpdatePassword(ctx context.Context, userID uuid.UUID, passwordHash string) error {
+	result, err := r.db.NewUpdate().
+		Model((*database.User)(nil)).
+		Set("password_hash = ?", passwordHash).
+		Set("updated_at = ?", time.Now()).
+		Where("id = ?", userID.String()).
+		Exec(ctx)
+
+	if err != nil {
+		return err
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+
+	if rowsAffected == 0 {
+		return ErrNotFound
+	}
+
+	return nil
+}
+
+// UpdateVerificationToken updates a user's verification token
+func (r *Repository) UpdateVerificationToken(ctx context.Context, userID uuid.UUID, token string) error {
+	now := time.Now()
+	result, err := r.db.NewUpdate().
+		Model((*database.User)(nil)).
+		Set("email_verification_token = ?", token).
+		Set("email_verification_sent_at = ?", now).
+		Set("updated_at = ?", now).
+		Where("id = ?", userID.String()).
+		Exec(ctx)
+
+	if err != nil {
+		return err
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+
+	if rowsAffected == 0 {
+		return ErrNotFound
+	}
+
+	return nil
+}

@@ -1,0 +1,159 @@
+package auth
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"time"
+
+	"github.com/google/uuid"
+	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
+)
+
+// mongoRefreshToken represents the refresh token document structure in MongoDB.
+type mongoRefreshToken struct {
+	ID        string     `bson:"_id"`
+	UserID    string     `bson:"user_id"`
+	TokenHash string     `bson:"token_hash"`
+	ExpiresAt time.Time  `bson:"expires_at"`
+	CreatedAt time.Time  `bson:"created_at"`
+	RevokedAt *time.Time `bson:"revoked_at,omitempty"`
+}
+
+// RefreshTokenRepo implements RefreshTokenRepository using MongoDB.
+type RefreshTokenRepo struct {
+	db *mongo.Database
+}
+
+// NewRefreshTokenRepository creates a new MongoDB refresh token repository.
+func NewRefreshTokenRepository(db *mongo.Database) *RefreshTokenRepo {
+	return &RefreshTokenRepo{db: db}
+}
+
+// collection returns the refresh_tokens collection.
+func (r *RefreshTokenRepo) collection() *mongo.Collection {
+	return r.db.Collection("refresh_tokens")
+}
+
+// StoreRefreshToken stores a new refresh token in the database.
+func (r *RefreshTokenRepo) StoreRefreshToken(ctx context.Context, userID uuid.UUID, token string, expiresAt time.Time) error {
+	now := time.Now()
+	tokenHash := hashToken(token)
+
+	doc := mongoRefreshToken{
+		ID:        uuid.New().String(),
+		UserID:    userID.String(),
+		TokenHash: tokenHash,
+		ExpiresAt: expiresAt,
+		CreatedAt: now,
+		RevokedAt: nil,
+	}
+
+	_, err := r.collection().InsertOne(ctx, doc)
+	if err != nil {
+		return fmt.Errorf("failed to store refresh token: %w", err)
+	}
+
+	return nil
+}
+
+// GetRefreshToken retrieves a refresh token by its value.
+func (r *RefreshTokenRepo) GetRefreshToken(ctx context.Context, token string) (*RefreshToken, error) {
+	tokenHash := hashToken(token)
+
+	var doc mongoRefreshToken
+	filter := bson.M{"token_hash": tokenHash}
+	err := r.collection().FindOne(ctx, filter).Decode(&doc)
+	if err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			return nil, ErrRefreshTokenNotFound
+		}
+		return nil, fmt.Errorf("failed to find refresh token: %w", err)
+	}
+
+	// Check if token is revoked
+	if doc.RevokedAt != nil {
+		return nil, ErrRefreshTokenNotFound
+	}
+
+	return mapMongoRefreshTokenToModel(&doc), nil
+}
+
+// RevokeRefreshToken marks a refresh token as revoked.
+func (r *RefreshTokenRepo) RevokeRefreshToken(ctx context.Context, token string) error {
+	tokenHash := hashToken(token)
+	now := time.Now()
+
+	filter := bson.M{
+		"token_hash": tokenHash,
+		"revoked_at": nil,
+	}
+	update := bson.M{
+		"$set": bson.M{
+			"revoked_at": now,
+		},
+	}
+
+	result, err := r.collection().UpdateOne(ctx, filter, update)
+	if err != nil {
+		return fmt.Errorf("failed to revoke refresh token: %w", err)
+	}
+
+	if result.MatchedCount == 0 {
+		return ErrRefreshTokenNotFound
+	}
+
+	return nil
+}
+
+// RevokeAllUserTokens revokes all refresh tokens for a given user.
+func (r *RefreshTokenRepo) RevokeAllUserTokens(ctx context.Context, userID uuid.UUID) error {
+	now := time.Now()
+
+	filter := bson.M{
+		"user_id":    userID.String(),
+		"revoked_at": nil,
+	}
+	update := bson.M{
+		"$set": bson.M{
+			"revoked_at": now,
+		},
+	}
+
+	_, err := r.collection().UpdateMany(ctx, filter, update)
+	if err != nil {
+		return fmt.Errorf("failed to revoke all user tokens: %w", err)
+	}
+
+	return nil
+}
+
+// CleanupExpiredTokens removes all expired refresh tokens from the database.
+func (r *RefreshTokenRepo) CleanupExpiredTokens(ctx context.Context) error {
+	now := time.Now()
+
+	filter := bson.M{
+		"expires_at": bson.M{"$lt": now},
+	}
+
+	_, err := r.collection().DeleteMany(ctx, filter)
+	if err != nil {
+		return fmt.Errorf("failed to cleanup expired tokens: %w", err)
+	}
+
+	return nil
+}
+
+// mapMongoRefreshTokenToModel converts a MongoDB refresh token document to the domain RefreshToken model.
+func mapMongoRefreshTokenToModel(doc *mongoRefreshToken) *RefreshToken {
+	userID, _ := uuid.Parse(doc.UserID)
+	return &RefreshToken{
+		ID:        0,
+		UserID:    userID,
+		TokenHash: doc.TokenHash,
+		ExpiresAt: doc.ExpiresAt,
+		CreatedAt: doc.CreatedAt,
+		RevokedAt: doc.RevokedAt,
+	}
+}

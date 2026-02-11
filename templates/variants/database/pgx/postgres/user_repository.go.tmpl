@@ -1,0 +1,253 @@
+package user
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+// Repository implements the RepositoryInterface using pgx with raw SQL queries.
+type Repository struct {
+	pool *pgxpool.Pool
+}
+
+// NewRepository creates a new user repository.
+func NewRepository(pool *pgxpool.Pool) *Repository {
+	return &Repository{pool: pool}
+}
+
+// Create creates a new user in the database.
+func (r *Repository) Create(ctx context.Context, email, passwordHash, verificationToken string) (*User, error) {
+	query := `
+		INSERT INTO users (email, password_hash, email_verification_token, email_verification_sent_at)
+		VALUES ($1, $2, $3, $4)
+		RETURNING id, email, password_hash, email_verified, email_verification_token, email_verification_sent_at, created_at, updated_at
+	`
+
+	now := time.Now()
+	var user User
+	var verificationTokenPtr *string
+	var verificationSentAtPtr *time.Time
+
+	err := r.pool.QueryRow(ctx, query, email, passwordHash, verificationToken, now).Scan(
+		&user.ID,
+		&user.Email,
+		&user.PasswordHash,
+		&user.EmailVerified,
+		&verificationTokenPtr,
+		&verificationSentAtPtr,
+		&user.CreatedAt,
+		&user.UpdatedAt,
+	)
+
+	if err != nil {
+		if strings.Contains(err.Error(), "duplicate key") {
+			return nil, ErrDuplicateEmail
+		}
+		return nil, fmt.Errorf("failed to create user: %w", err)
+	}
+
+	user.EmailVerificationToken = verificationTokenPtr
+	user.EmailVerificationSentAt = verificationSentAtPtr
+
+	return &user, nil
+}
+
+// GetByEmail retrieves a user by their email address.
+func (r *Repository) GetByEmail(ctx context.Context, email string) (*User, error) {
+	query := `
+		SELECT id, email, password_hash, email_verified, email_verification_token, email_verification_sent_at, created_at, updated_at
+		FROM users
+		WHERE email = $1
+	`
+
+	var user User
+	var verificationTokenPtr *string
+	var verificationSentAtPtr *time.Time
+
+	err := r.pool.QueryRow(ctx, query, email).Scan(
+		&user.ID,
+		&user.Email,
+		&user.PasswordHash,
+		&user.EmailVerified,
+		&verificationTokenPtr,
+		&verificationSentAtPtr,
+		&user.CreatedAt,
+		&user.UpdatedAt,
+	)
+
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("failed to get user by email: %w", err)
+	}
+
+	user.EmailVerificationToken = verificationTokenPtr
+	user.EmailVerificationSentAt = verificationSentAtPtr
+
+	return &user, nil
+}
+
+// GetByID retrieves a user by their ID.
+func (r *Repository) GetByID(ctx context.Context, id uuid.UUID) (*User, error) {
+	query := `
+		SELECT id, email, password_hash, email_verified, email_verification_token, email_verification_sent_at, created_at, updated_at
+		FROM users
+		WHERE id = $1
+	`
+
+	var user User
+	var verificationTokenPtr *string
+	var verificationSentAtPtr *time.Time
+
+	err := r.pool.QueryRow(ctx, query, id).Scan(
+		&user.ID,
+		&user.Email,
+		&user.PasswordHash,
+		&user.EmailVerified,
+		&verificationTokenPtr,
+		&verificationSentAtPtr,
+		&user.CreatedAt,
+		&user.UpdatedAt,
+	)
+
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("failed to get user by ID: %w", err)
+	}
+
+	user.EmailVerificationToken = verificationTokenPtr
+	user.EmailVerificationSentAt = verificationSentAtPtr
+
+	return &user, nil
+}
+
+// GetByVerificationToken retrieves a user by their email verification token.
+func (r *Repository) GetByVerificationToken(ctx context.Context, token string) (*User, error) {
+	query := `
+		SELECT id, email, password_hash, email_verified, email_verification_token, email_verification_sent_at, created_at, updated_at
+		FROM users
+		WHERE email_verification_token = $1
+	`
+
+	var user User
+	var verificationTokenPtr *string
+	var verificationSentAtPtr *time.Time
+
+	err := r.pool.QueryRow(ctx, query, token).Scan(
+		&user.ID,
+		&user.Email,
+		&user.PasswordHash,
+		&user.EmailVerified,
+		&verificationTokenPtr,
+		&verificationSentAtPtr,
+		&user.CreatedAt,
+		&user.UpdatedAt,
+	)
+
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("failed to get user by verification token: %w", err)
+	}
+
+	user.EmailVerificationToken = verificationTokenPtr
+	user.EmailVerificationSentAt = verificationSentAtPtr
+
+	return &user, nil
+}
+
+// CheckIfTokenAlreadyUsed checks if a verification token has already been used (email is verified and token is cleared).
+func (r *Repository) CheckIfTokenAlreadyUsed(ctx context.Context, token string) (bool, error) {
+	query := `
+		SELECT COUNT(*)
+		FROM users
+		WHERE email_verification_token IS NULL
+		AND email_verified = true
+		AND email_verification_sent_at IS NOT NULL
+	`
+
+	var count int
+	err := r.pool.QueryRow(ctx, query).Scan(&count)
+	if err != nil {
+		return false, fmt.Errorf("failed to check if token already used: %w", err)
+	}
+
+	return count > 0, nil
+}
+
+// MarkEmailAsVerified marks a user's email as verified and clears the verification token.
+func (r *Repository) MarkEmailAsVerified(ctx context.Context, userID uuid.UUID) error {
+	query := `
+		UPDATE users
+		SET email_verified = true,
+		    email_verification_token = NULL,
+		    updated_at = $1
+		WHERE id = $2
+	`
+
+	result, err := r.pool.Exec(ctx, query, time.Now(), userID)
+	if err != nil {
+		return fmt.Errorf("failed to mark email as verified: %w", err)
+	}
+
+	if result.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+
+	return nil
+}
+
+// UpdatePassword updates a user's password hash.
+func (r *Repository) UpdatePassword(ctx context.Context, userID uuid.UUID, passwordHash string) error {
+	query := `
+		UPDATE users
+		SET password_hash = $1,
+		    updated_at = $2
+		WHERE id = $3
+	`
+
+	result, err := r.pool.Exec(ctx, query, passwordHash, time.Now(), userID)
+	if err != nil {
+		return fmt.Errorf("failed to update password: %w", err)
+	}
+
+	if result.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+
+	return nil
+}
+
+// UpdateVerificationToken updates a user's email verification token.
+func (r *Repository) UpdateVerificationToken(ctx context.Context, userID uuid.UUID, token string) error {
+	query := `
+		UPDATE users
+		SET email_verification_token = $1,
+		    email_verification_sent_at = $2,
+		    updated_at = $3
+		WHERE id = $4
+	`
+
+	now := time.Now()
+	result, err := r.pool.Exec(ctx, query, token, now, now, userID)
+	if err != nil {
+		return fmt.Errorf("failed to update verification token: %w", err)
+	}
+
+	if result.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+
+	return nil
+}

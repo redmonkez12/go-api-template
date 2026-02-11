@@ -1,4 +1,4 @@
-.PHONY: help run build build-cli test docker-up docker-down migrate-up migrate-down migrate-create swagger docker-build docker-run docker-prod-run
+.PHONY: help run build test docker-up docker-down{{if .IsSQL}} migrate-up migrate-down migrate-create{{end}} swagger deps install-tools
 
 help: ## Show this help message
 	@echo 'Usage: make [target]'
@@ -11,9 +11,6 @@ run: ## Run the application
 
 build: ## Build the application
 	go build -o bin/api cmd/api/main.go
-
-build-cli: ## Build the CLI scaffolding tool
-	go build -o bin/create-go-api cmd/cli/main.go
 
 test: ## Run tests
 	go test -v -race -coverprofile=coverage.out ./...
@@ -28,7 +25,7 @@ docker-down: ## Stop Docker containers
 docker-logs: ## View Docker container logs
 	docker-compose logs -f
 
-migrate-up: ## Run database migrations up
+{{if .IsPostgres}}migrate-up: ## Run database migrations up
 	@echo "Running migrations..."
 	@set -a && . ./.env && set +a && migrate -path migrations -database "postgres://$${DB_USER}:$${DB_PASSWORD}@$${DB_HOST}:$${DB_PORT}/$${DB_NAME}?sslmode=$${DB_SSLMODE}" up
 
@@ -38,14 +35,25 @@ migrate-down: ## Run database migrations down
 
 migrate-create: ## Create a new migration (usage: make migrate-create NAME=migration_name)
 	@migrate create -ext sql -dir migrations -seq $(NAME)
+{{end}}{{if .IsMySQL}}migrate-up: ## Run database migrations up
+	@echo "Running migrations..."
+	@set -a && . ./.env && set +a && migrate -path migrations -database "mysql://$${DB_USER}:$${DB_PASSWORD}@tcp($${DB_HOST}:$${DB_PORT})/$${DB_NAME}" up
 
+migrate-down: ## Run database migrations down
+	@echo "Rolling back migrations..."
+	@set -a && . ./.env && set +a && migrate -path migrations -database "mysql://$${DB_USER}:$${DB_PASSWORD}@tcp($${DB_HOST}:$${DB_PORT})/$${DB_NAME}" down
+
+migrate-create: ## Create a new migration (usage: make migrate-create NAME=migration_name)
+	@migrate create -ext sql -dir migrations -seq $(NAME)
+{{end}}
 deps: ## Download dependencies
 	go mod download
 	go mod tidy
 
 install-tools: ## Install development tools
-	go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@latest
-	go install github.com/swaggo/swag/cmd/swag@latest
+{{if .IsPostgres}}	go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@latest
+{{end}}{{if .IsMySQL}}	go install -tags 'mysql' github.com/golang-migrate/migrate/v4/cmd/migrate@latest
+{{end}}	go install github.com/swaggo/swag/cmd/swag@latest
 
 swagger: ## Generate Swagger documentation
 	@echo "Generating Swagger documentation..."
@@ -58,26 +66,13 @@ swagger-clean: ## Clean generated Swagger files
 
 docker-build: ## Build production Docker image
 	@echo "Building production Docker image..."
-	@docker build -t go-api-template:latest .
+	@docker build -t {{.ProjectName}}:latest .
 
-docker-run: ## Run production Docker image (requires .env file or env vars)
+docker-run: ## Run production Docker image
 	@echo "Running production Docker container..."
 	@docker run --rm \
-		--name go-api-template \
+		--name {{.ProjectName}} \
 		-p 8080:8080 \
 		--env-file .env \
 		-e APP_ENV=prod \
-		go-api-template:latest
-
-docker-dev-run: ## Run Docker image in development mode
-	@echo "Running development Docker container with Swagger enabled..."
-	@docker run --rm \
-		--name go-api-template-dev \
-		-p 8080:8080 \
-		--env-file .env \
-		-e APP_ENV=dev \
-		go-api-template:latest
-
-docker-stop: ## Stop running Docker container
-	@docker stop go-api-template || true
-	@docker stop go-api-template-dev || true
+		{{.ProjectName}}:latest

@@ -1,0 +1,21 @@
+package database
+
+import (
+	"log"
+
+	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
+)
+
+// NewGormDB creates a new GORM database connection
+func NewGormDB(dialector gorm.Dialector) (*gorm.DB, error) {
+	db, err := gorm.Open(dialector, &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Silent),
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	log.Println("Database connection established")
+	return db, nil
+}

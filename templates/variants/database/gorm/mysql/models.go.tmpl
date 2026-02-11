@@ -1,0 +1,64 @@
+package database
+
+import (
+	"time"
+
+	"github.com/google/uuid"
+	"gorm.io/gorm"
+)
+
+// User represents a user account in the database
+type User struct {
+	ID                        string     `gorm:"column:id;type:char(36);primaryKey"`
+	Email                     string     `gorm:"column:email;type:varchar(255);uniqueIndex;not null"`
+	PasswordHash              string     `gorm:"column:password_hash;type:varchar(255);not null"`
+	EmailVerified             bool       `gorm:"column:email_verified;not null;default:false"`
+	EmailVerificationToken    *string    `gorm:"column:email_verification_token;type:varchar(64);index"`
+	EmailVerificationSentAt   *time.Time `gorm:"column:email_verification_sent_at"`
+	CreatedAt                 time.Time  `gorm:"column:created_at;not null;default:CURRENT_TIMESTAMP"`
+	UpdatedAt                 time.Time  `gorm:"column:updated_at;not null;default:CURRENT_TIMESTAMP"`
+}
+
+// BeforeCreate hook generates UUID if not set
+func (u *User) BeforeCreate(tx *gorm.DB) error {
+	if u.ID == "" {
+		u.ID = uuid.New().String()
+	}
+	return nil
+}
+
+// TableName specifies the table name
+func (User) TableName() string {
+	return "users"
+}
+
+// RefreshToken represents a refresh token in the database
+type RefreshToken struct {
+	ID        uint64     `gorm:"column:id;primaryKey;autoIncrement"`
+	UserID    string     `gorm:"column:user_id;type:char(36);not null;index"`
+	TokenHash string     `gorm:"column:token_hash;type:varchar(64);uniqueIndex;not null"`
+	ExpiresAt time.Time  `gorm:"column:expires_at;not null"`
+	CreatedAt time.Time  `gorm:"column:created_at;not null;default:CURRENT_TIMESTAMP"`
+	RevokedAt *time.Time `gorm:"column:revoked_at"`
+	User      User       `gorm:"foreignKey:UserID;references:ID;constraint:OnDelete:CASCADE"`
+}
+
+// TableName specifies the table name
+func (RefreshToken) TableName() string {
+	return "refresh_tokens"
+}
+
+// IsRevoked returns true if the token has been revoked
+func (t *RefreshToken) IsRevoked() bool {
+	return t.RevokedAt != nil
+}
+
+// IsExpired returns true if the token has expired
+func (t *RefreshToken) IsExpired() bool {
+	return time.Now().After(t.ExpiresAt)
+}
+
+// IsValid returns true if the token is not revoked and not expired
+func (t *RefreshToken) IsValid() bool {
+	return !t.IsRevoked() && !t.IsExpired()
+}

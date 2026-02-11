@@ -1,0 +1,184 @@
+package user
+
+import (
+	"context"
+	"errors"
+	"strings"
+
+	"go-api-template/internal/database"
+
+	"github.com/google/uuid"
+	"gorm.io/gorm"
+)
+
+// Repository implements the RepositoryInterface using GORM.
+type Repository struct {
+	db *gorm.DB
+}
+
+// NewRepository creates a new user repository.
+func NewRepository(db *gorm.DB) *Repository {
+	return &Repository{db: db}
+}
+
+// Create creates a new user in the database.
+func (r *Repository) Create(ctx context.Context, email, passwordHash, verificationToken string) (*User, error) {
+	dbUser := &database.User{
+		Email:                  email,
+		PasswordHash:           passwordHash,
+		EmailVerificationToken: &verificationToken,
+		EmailVerified:          false,
+	}
+
+	result := r.db.WithContext(ctx).Create(dbUser)
+	if result.Error != nil {
+		// Check for duplicate email constraint violation
+		if isDuplicateKeyError(result.Error) {
+			return nil, ErrDuplicateEmail
+		}
+		return nil, result.Error
+	}
+
+	return mapDBUserToModel(dbUser), nil
+}
+
+// GetByEmail retrieves a user by their email address.
+func (r *Repository) GetByEmail(ctx context.Context, email string) (*User, error) {
+	var dbUser database.User
+	result := r.db.WithContext(ctx).Where("email = ?", email).First(&dbUser)
+	if result.Error != nil {
+		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+			return nil, ErrNotFound
+		}
+		return nil, result.Error
+	}
+
+	return mapDBUserToModel(&dbUser), nil
+}
+
+// GetByID retrieves a user by their ID.
+func (r *Repository) GetByID(ctx context.Context, id uuid.UUID) (*User, error) {
+	var dbUser database.User
+	result := r.db.WithContext(ctx).Where("id = ?", id).First(&dbUser)
+	if result.Error != nil {
+		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+			return nil, ErrNotFound
+		}
+		return nil, result.Error
+	}
+
+	return mapDBUserToModel(&dbUser), nil
+}
+
+// GetByVerificationToken retrieves a user by their email verification token.
+func (r *Repository) GetByVerificationToken(ctx context.Context, token string) (*User, error) {
+	var dbUser database.User
+	result := r.db.WithContext(ctx).Where("email_verification_token = ?", token).First(&dbUser)
+	if result.Error != nil {
+		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+			return nil, ErrNotFound
+		}
+		return nil, result.Error
+	}
+
+	return mapDBUserToModel(&dbUser), nil
+}
+
+// CheckIfTokenAlreadyUsed checks if a verification token has already been used.
+func (r *Repository) CheckIfTokenAlreadyUsed(ctx context.Context, token string) (bool, error) {
+	var count int64
+	result := r.db.WithContext(ctx).
+		Model(&database.User{}).
+		Where("email_verification_token IS NULL AND email_verified = ?", true).
+		Count(&count)
+	if result.Error != nil {
+		return false, result.Error
+	}
+
+	// If we can't find the user by token but they exist with verified email,
+	// the token was already used
+	var tokenExists int64
+	result = r.db.WithContext(ctx).
+		Model(&database.User{}).
+		Where("email_verification_token = ?", token).
+		Count(&tokenExists)
+	if result.Error != nil {
+		return false, result.Error
+	}
+
+	// Token is used if it doesn't exist anymore in the database
+	return tokenExists == 0, nil
+}
+
+// MarkEmailAsVerified marks a user's email as verified.
+func (r *Repository) MarkEmailAsVerified(ctx context.Context, userID uuid.UUID) error {
+	result := r.db.WithContext(ctx).
+		Model(&database.User{}).
+		Where("id = ?", userID).
+		Updates(map[string]interface{}{
+			"email_verified":           true,
+			"email_verification_token": nil,
+		})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// UpdatePassword updates a user's password hash.
+func (r *Repository) UpdatePassword(ctx context.Context, userID uuid.UUID, passwordHash string) error {
+	result := r.db.WithContext(ctx).
+		Model(&database.User{}).
+		Where("id = ?", userID).
+		Update("password_hash", passwordHash)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// UpdateVerificationToken updates a user's email verification token.
+func (r *Repository) UpdateVerificationToken(ctx context.Context, userID uuid.UUID, token string) error {
+	result := r.db.WithContext(ctx).
+		Model(&database.User{}).
+		Where("id = ?", userID).
+		Update("email_verification_token", token)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// mapDBUserToModel converts a database user model to a domain user model.
+func mapDBUserToModel(dbUser *database.User) *User {
+	return &User{
+		ID:                      dbUser.ID,
+		Email:                   dbUser.Email,
+		PasswordHash:            dbUser.PasswordHash,
+		EmailVerified:           dbUser.EmailVerified,
+		EmailVerificationToken:  dbUser.EmailVerificationToken,
+		EmailVerificationSentAt: dbUser.EmailVerificationSentAt,
+		CreatedAt:               dbUser.CreatedAt,
+		UpdatedAt:               dbUser.UpdatedAt,
+	}
+}
+
+// isDuplicateKeyError checks if the error is a duplicate key constraint violation.
+func isDuplicateKeyError(err error) bool {
+	if err == nil {
+		return false
+	}
+	errMsg := strings.ToLower(err.Error())
+	return strings.Contains(errMsg, "duplicate key") ||
+		strings.Contains(errMsg, "duplicate entry") ||
+		strings.Contains(errMsg, "unique constraint")
+}

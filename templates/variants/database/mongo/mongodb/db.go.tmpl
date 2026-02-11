@@ -1,0 +1,86 @@
+package database
+
+import (
+	"context"
+	"fmt"
+	"time"
+
+	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
+)
+
+// ConnectMongoDB establishes a connection to MongoDB and returns a client.
+func ConnectMongoDB(uri string) (*mongo.Client, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	client, err := mongo.Connect(options.Client().ApplyURI(uri))
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect to MongoDB: %w", err)
+	}
+
+	// Ping the database to verify connection
+	if err := client.Ping(ctx, nil); err != nil {
+		return nil, fmt.Errorf("failed to ping MongoDB: %w", err)
+	}
+
+	return client, nil
+}
+
+// SetupIndexes creates all required indexes for the application.
+func SetupIndexes(db *mongo.Database) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// Users collection indexes
+	usersCollection := db.Collection("users")
+
+	// Unique index on email
+	_, err := usersCollection.Indexes().CreateOne(ctx, mongo.IndexModel{
+		Keys:    bson.D{{Key: "email", Value: 1}},
+		Options: options.Index().SetUnique(true),
+	})
+	if err != nil {
+		return fmt.Errorf("failed to create unique index on users.email: %w", err)
+	}
+
+	// Index on email_verification_token for faster lookups
+	_, err = usersCollection.Indexes().CreateOne(ctx, mongo.IndexModel{
+		Keys: bson.D{{Key: "email_verification_token", Value: 1}},
+		Options: options.Index().SetSparse(true), // Only index non-null values
+	})
+	if err != nil {
+		return fmt.Errorf("failed to create index on users.email_verification_token: %w", err)
+	}
+
+	// Refresh tokens collection indexes
+	refreshTokensCollection := db.Collection("refresh_tokens")
+
+	// Unique index on token_hash
+	_, err = refreshTokensCollection.Indexes().CreateOne(ctx, mongo.IndexModel{
+		Keys:    bson.D{{Key: "token_hash", Value: 1}},
+		Options: options.Index().SetUnique(true),
+	})
+	if err != nil {
+		return fmt.Errorf("failed to create unique index on refresh_tokens.token_hash: %w", err)
+	}
+
+	// Index on user_id for faster lookups when revoking all user tokens
+	_, err = refreshTokensCollection.Indexes().CreateOne(ctx, mongo.IndexModel{
+		Keys: bson.D{{Key: "user_id", Value: 1}},
+	})
+	if err != nil {
+		return fmt.Errorf("failed to create index on refresh_tokens.user_id: %w", err)
+	}
+
+	// Index on expires_at for efficient cleanup of expired tokens
+	_, err = refreshTokensCollection.Indexes().CreateOne(ctx, mongo.IndexModel{
+		Keys: bson.D{{Key: "expires_at", Value: 1}},
+	})
+	if err != nil {
+		return fmt.Errorf("failed to create index on refresh_tokens.expires_at: %w", err)
+	}
+
+	return nil
+}

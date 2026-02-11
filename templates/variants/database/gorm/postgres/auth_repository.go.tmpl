@@ -1,0 +1,104 @@
+package auth
+
+import (
+	"context"
+	"errors"
+	"time"
+
+	"go-api-template/internal/database"
+
+	"github.com/google/uuid"
+	"gorm.io/gorm"
+)
+
+// RefreshTokenRepo implements RefreshTokenRepository using GORM.
+type RefreshTokenRepo struct {
+	db *gorm.DB
+}
+
+// NewRefreshTokenRepository creates a new GORM-based refresh token repository.
+func NewRefreshTokenRepository(db *gorm.DB) *RefreshTokenRepo {
+	return &RefreshTokenRepo{db: db}
+}
+
+// StoreRefreshToken stores a new refresh token in the database.
+func (r *RefreshTokenRepo) StoreRefreshToken(ctx context.Context, userID uuid.UUID, token string, expiresAt time.Time) error {
+	tokenHash := hashToken(token)
+
+	dbToken := &database.RefreshToken{
+		UserID:    userID,
+		TokenHash: tokenHash,
+		ExpiresAt: expiresAt,
+	}
+
+	result := r.db.WithContext(ctx).Create(dbToken)
+	return result.Error
+}
+
+// GetRefreshToken retrieves a refresh token by its token value.
+func (r *RefreshTokenRepo) GetRefreshToken(ctx context.Context, token string) (*RefreshToken, error) {
+	tokenHash := hashToken(token)
+
+	var dbToken database.RefreshToken
+	result := r.db.WithContext(ctx).Where("token_hash = ?", tokenHash).First(&dbToken)
+	if result.Error != nil {
+		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+			return nil, ErrRefreshTokenNotFound
+		}
+		return nil, result.Error
+	}
+
+	return mapDBRefreshTokenToModel(&dbToken), nil
+}
+
+// RevokeRefreshToken revokes a specific refresh token.
+func (r *RefreshTokenRepo) RevokeRefreshToken(ctx context.Context, token string) error {
+	tokenHash := hashToken(token)
+	now := time.Now()
+
+	result := r.db.WithContext(ctx).
+		Model(&database.RefreshToken{}).
+		Where("token_hash = ?", tokenHash).
+		Update("revoked_at", now)
+
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return ErrRefreshTokenNotFound
+	}
+	return nil
+}
+
+// RevokeAllUserTokens revokes all refresh tokens for a specific user.
+func (r *RefreshTokenRepo) RevokeAllUserTokens(ctx context.Context, userID uuid.UUID) error {
+	now := time.Now()
+
+	result := r.db.WithContext(ctx).
+		Model(&database.RefreshToken{}).
+		Where("user_id = ? AND revoked_at IS NULL", userID).
+		Update("revoked_at", now)
+
+	return result.Error
+}
+
+// CleanupExpiredTokens removes expired refresh tokens from the database.
+func (r *RefreshTokenRepo) CleanupExpiredTokens(ctx context.Context) error {
+	result := r.db.WithContext(ctx).
+		Where("expires_at < ?", time.Now()).
+		Delete(&database.RefreshToken{})
+
+	return result.Error
+}
+
+// mapDBRefreshTokenToModel converts a database refresh token to a domain model.
+func mapDBRefreshTokenToModel(dbToken *database.RefreshToken) *RefreshToken {
+	return &RefreshToken{
+		ID:        dbToken.ID,
+		UserID:    dbToken.UserID,
+		TokenHash: dbToken.TokenHash,
+		ExpiresAt: dbToken.ExpiresAt,
+		CreatedAt: dbToken.CreatedAt,
+		RevokedAt: dbToken.RevokedAt,
+	}
+}

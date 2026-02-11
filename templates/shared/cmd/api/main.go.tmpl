@@ -1,0 +1,275 @@
+package main
+
+import (
+	"context"{{if or .IsBun .IsSQLRaw}}
+	"database/sql"{{end}}
+	"fmt"
+	"log"
+	"os"
+	"os/signal"
+	"syscall"
+{{if .IsBun}}{{if .IsPostgres}}
+	_ "github.com/lib/pq"
+	"github.com/uptrace/bun"
+	"github.com/uptrace/bun/dialect/pgdialect"{{end}}{{if .IsMySQL}}
+	_ "github.com/go-sql-driver/mysql"
+	"github.com/uptrace/bun"
+	"github.com/uptrace/bun/dialect/mysqldialect"{{end}}{{end}}{{if .IsGORM}}
+	"gorm.io/gorm"{{if .IsPostgres}}
+	"gorm.io/driver/postgres"{{end}}{{if .IsMySQL}}
+	"gorm.io/driver/mysql"{{end}}{{end}}{{if .IsPgx}}
+	"github.com/jackc/pgx/v5/pgxpool"{{end}}{{if .IsSQLRaw}}
+	_ "github.com/go-sql-driver/mysql"{{end}}{{if .IsMongo}}
+	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"{{end}}
+	"github.com/redis/go-redis/v9"
+
+	"{{.ModuleName}}/internal/auth"
+	"{{.ModuleName}}/internal/config"
+	"{{.ModuleName}}/internal/email"
+	httpServer "{{.ModuleName}}/internal/http"
+	"{{.ModuleName}}/internal/logging"
+	"{{.ModuleName}}/internal/ratelimit"
+	"{{.ModuleName}}/internal/user"{{if .IsBun}}
+	"{{.ModuleName}}/internal/database"{{end}}
+)
+
+// @title           {{.ProjectName}}
+// @version         1.0
+// @description     A production-ready Go REST API with authentication.
+
+// @contact.name   API Support
+// @contact.email  support@example.com
+
+// @license.name  MIT
+// @license.url   https://opensource.org/licenses/MIT
+
+// @host      localhost:8080
+// @BasePath  /
+
+// @securityDefinitions.apikey BearerAuth
+// @in header
+// @name Authorization
+// @description Type "Bearer" followed by a space and the access token.
+
+func main() {
+	if err := run(); err != nil {
+		log.Fatalf("Application error: %v", err)
+	}
+}
+
+func run() error {
+	// Load configuration
+	cfg, err := config.Load()
+	if err != nil {
+		return fmt.Errorf("failed to load config: %w", err)
+	}
+
+	// Initialize logger
+	logger := logging.NewLogger(cfg.Server.IsDevelopment())
+	logger.Info("starting application",
+		"env", cfg.Server.Env,
+		"port", cfg.Server.Port,
+	)
+
+	// Initialize database connection
+{{if .IsBun}}{{if .IsPostgres}}	sqlDB, err := sql.Open("postgres", cfg.Database.ConnectionString())
+	if err != nil {
+		return fmt.Errorf("failed to open database: %w", err)
+	}
+	if err := sqlDB.Ping(); err != nil {
+		sqlDB.Close()
+		return fmt.Errorf("failed to ping database: %w", err)
+	}
+	sqlDB.SetMaxOpenConns(25)
+	sqlDB.SetMaxIdleConns(5)
+	db := bun.NewDB(sqlDB, pgdialect.New())
+	defer db.Close()
+{{end}}{{if .IsMySQL}}	sqlDB, err := sql.Open("mysql", cfg.Database.DSN())
+	if err != nil {
+		return fmt.Errorf("failed to open database: %w", err)
+	}
+	if err := sqlDB.Ping(); err != nil {
+		sqlDB.Close()
+		return fmt.Errorf("failed to ping database: %w", err)
+	}
+	sqlDB.SetMaxOpenConns(25)
+	sqlDB.SetMaxIdleConns(5)
+	db := bun.NewDB(sqlDB, mysqldialect.New())
+	defer db.Close()
+{{end}}{{end}}{{if .IsGORM}}{{if .IsPostgres}}	gormDB, err := gorm.Open(postgres.Open(cfg.Database.ConnectionString()), &gorm.Config{})
+	if err != nil {
+		return fmt.Errorf("failed to open database: %w", err)
+	}
+	sqlDB, err := gormDB.DB()
+	if err != nil {
+		return fmt.Errorf("failed to get underlying sql.DB: %w", err)
+	}
+	sqlDB.SetMaxOpenConns(25)
+	sqlDB.SetMaxIdleConns(5)
+	defer sqlDB.Close()
+{{end}}{{if .IsMySQL}}	gormDB, err := gorm.Open(mysql.Open(cfg.Database.DSN()), &gorm.Config{})
+	if err != nil {
+		return fmt.Errorf("failed to open database: %w", err)
+	}
+	sqlDB, err := gormDB.DB()
+	if err != nil {
+		return fmt.Errorf("failed to get underlying sql.DB: %w", err)
+	}
+	sqlDB.SetMaxOpenConns(25)
+	sqlDB.SetMaxIdleConns(5)
+	defer sqlDB.Close()
+{{end}}{{end}}{{if .IsPgx}}	pool, err := pgxpool.New(context.Background(), cfg.Database.ConnectionString())
+	if err != nil {
+		return fmt.Errorf("failed to create connection pool: %w", err)
+	}
+	if err := pool.Ping(context.Background()); err != nil {
+		pool.Close()
+		return fmt.Errorf("failed to ping database: %w", err)
+	}
+	defer pool.Close()
+{{end}}{{if .IsMongo}}	mongoClient, err := mongo.Connect(options.Client().ApplyURI(cfg.Database.URI()))
+	if err != nil {
+		return fmt.Errorf("failed to connect to MongoDB: %w", err)
+	}
+	defer func() {
+		if err := mongoClient.Disconnect(context.Background()); err != nil {
+			log.Printf("failed to disconnect from MongoDB: %v", err)
+		}
+	}()
+	if err := mongoClient.Ping(context.Background(), nil); err != nil {
+		return fmt.Errorf("failed to ping MongoDB: %w", err)
+	}
+	mongoDB := mongoClient.Database(cfg.Database.DBName)
+{{end}}{{if .IsSQLRaw}}	sqlDB, err := sql.Open("mysql", cfg.Database.DSN())
+	if err != nil {
+		return fmt.Errorf("failed to open database: %w", err)
+	}
+	if err := sqlDB.Ping(); err != nil {
+		sqlDB.Close()
+		return fmt.Errorf("failed to ping database: %w", err)
+	}
+	sqlDB.SetMaxOpenConns(25)
+	sqlDB.SetMaxIdleConns(5)
+	defer sqlDB.Close()
+{{end}}
+	// Initialize Redis connection
+	redisClient, err := initRedis(cfg.Redis)
+	if err != nil {
+		return fmt.Errorf("failed to initialize Redis: %w", err)
+	}
+	defer redisClient.Close()
+
+	// Initialize repositories
+{{if .IsBun}}	userRepo := user.NewRepository(db)
+	authRepo := auth.NewRefreshTokenRepository(db)
+{{end}}{{if .IsGORM}}	userRepo := user.NewRepository(gormDB)
+	authRepo := auth.NewRefreshTokenRepository(gormDB)
+{{end}}{{if .IsPgx}}	userRepo := user.NewRepository(pool)
+	authRepo := auth.NewRefreshTokenRepository(pool)
+{{end}}{{if .IsMongo}}	userRepo := user.NewRepository(mongoDB)
+	authRepo := auth.NewRefreshTokenRepository(mongoDB)
+{{end}}{{if .IsSQLRaw}}	userRepo := user.NewRepository(sqlDB)
+	authRepo := auth.NewRefreshTokenRepository(sqlDB)
+{{end}}	passwordResetRepo := auth.NewPasswordResetRepository(redisClient)
+
+	// Initialize rate limiter
+	rateLimiter := ratelimit.NewLimiter(redisClient)
+
+	// Initialize token service
+{{if .IsPaseto}}	tokenService, err := auth.NewPasetoService(cfg.Auth.PasetoKey)
+	if err != nil {
+		return fmt.Errorf("failed to initialize PASETO service: %w", err)
+	}
+{{end}}{{if .IsJWT}}	tokenService := auth.NewJWTService(cfg.Auth.JWTSecret)
+{{end}}
+	// Initialize email service
+	emailService := email.NewService(
+		cfg.Email.SMTPHost,
+		cfg.Email.SMTPPort,
+		cfg.Email.SMTPUser,
+		cfg.Email.SMTPPassword,
+		cfg.Email.FrontendURL,
+	)
+
+	// Initialize auth service
+	authService := auth.NewService(
+		userRepo,
+		authRepo,
+		passwordResetRepo,
+		tokenService,
+		emailService,
+		logger,
+		cfg.Auth.AccessTokenDuration,
+		cfg.Auth.RefreshTokenDuration,
+	)
+
+	// Initialize HTTP handlers
+	authHandler := auth.NewHandler(
+		authService,
+		rateLimiter,
+		logger,
+		!cfg.Server.IsDevelopment(),
+		cfg.Auth.AccessTokenDuration,
+		cfg.Auth.RefreshTokenDuration,
+	)
+	authMiddleware := auth.NewMiddleware(tokenService)
+
+	// Initialize router
+	router := httpServer.NewRouter(cfg, authHandler, authMiddleware, logger)
+
+	// Initialize HTTP server
+	serverAddr := ":" + cfg.Server.Port
+	server := httpServer.NewServer(
+		serverAddr,
+		router,
+		cfg.Server.ReadTimeout,
+		cfg.Server.WriteTimeout,
+	)
+
+	// Start server in a goroutine
+	serverErrors := make(chan error, 1)
+	go func() {
+		serverErrors <- server.Start()
+	}()
+
+	// Wait for interrupt signal or server error
+	shutdown := make(chan os.Signal, 1)
+	signal.Notify(shutdown, os.Interrupt, syscall.SIGTERM)
+
+	select {
+	case err := <-serverErrors:
+		return fmt.Errorf("server error: %w", err)
+	case sig := <-shutdown:
+		log.Printf("Received signal: %v", sig)
+
+		ctx, cancel := context.WithTimeout(context.Background(), cfg.Server.ShutdownTimeout)
+		defer cancel()
+
+		if err := server.Shutdown(ctx); err != nil {
+			return fmt.Errorf("graceful shutdown failed: %w", err)
+		}
+	}
+
+	return nil
+}
+
+// initRedis initializes the Redis connection and returns a Redis client
+func initRedis(cfg config.RedisConfig) (*redis.Client, error) {
+	client := redis.NewClient(&redis.Options{
+		Addr:     cfg.Address(),
+		Password: cfg.Password,
+		DB:       cfg.DB,
+	})
+
+	ctx := context.Background()
+	if err := client.Ping(ctx).Err(); err != nil {
+		return nil, fmt.Errorf("failed to ping Redis: %w", err)
+	}
+
+	return client, nil
+}
+
+{{if .IsBun}}// Ensure database models import is used
+var _ = database.User{}
+{{end}}

@@ -1,0 +1,178 @@
+package user
+
+import (
+	"context"
+	"errors"
+	"strings"
+	"time"
+
+	"go-api-template/internal/database"
+
+	"github.com/google/uuid"
+	"gorm.io/gorm"
+)
+
+// Repository implements the RepositoryInterface using GORM
+type Repository struct {
+	db *gorm.DB
+}
+
+// NewRepository creates a new user repository
+func NewRepository(db *gorm.DB) *Repository {
+	return &Repository{db: db}
+}
+
+// Create creates a new user in the database
+func (r *Repository) Create(ctx context.Context, email, passwordHash, verificationToken string) (*User, error) {
+	dbUser := &database.User{
+		Email:                   email,
+		PasswordHash:            passwordHash,
+		EmailVerified:           false,
+		EmailVerificationToken:  &verificationToken,
+		EmailVerificationSentAt: timePtr(time.Now()),
+	}
+
+	if err := r.db.WithContext(ctx).Create(dbUser).Error; err != nil {
+		if strings.Contains(err.Error(), "Duplicate entry") {
+			return nil, ErrDuplicateEmail
+		}
+		return nil, err
+	}
+
+	return mapDBUserToModel(dbUser), nil
+}
+
+// GetByEmail retrieves a user by their email address
+func (r *Repository) GetByEmail(ctx context.Context, email string) (*User, error) {
+	var dbUser database.User
+	err := r.db.WithContext(ctx).Where("email = ?", email).First(&dbUser).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+
+	return mapDBUserToModel(&dbUser), nil
+}
+
+// GetByID retrieves a user by their ID
+func (r *Repository) GetByID(ctx context.Context, id uuid.UUID) (*User, error) {
+	var dbUser database.User
+	err := r.db.WithContext(ctx).Where("id = ?", id.String()).First(&dbUser).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+
+	return mapDBUserToModel(&dbUser), nil
+}
+
+// GetByVerificationToken retrieves a user by their verification token
+func (r *Repository) GetByVerificationToken(ctx context.Context, token string) (*User, error) {
+	var dbUser database.User
+	err := r.db.WithContext(ctx).Where("email_verification_token = ?", token).First(&dbUser).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+
+	return mapDBUserToModel(&dbUser), nil
+}
+
+// CheckIfTokenAlreadyUsed checks if a verification token has already been used
+func (r *Repository) CheckIfTokenAlreadyUsed(ctx context.Context, token string) (bool, error) {
+	var count int64
+	err := r.db.WithContext(ctx).
+		Model(&database.User{}).
+		Where("email_verification_token = ? AND email_verified = ?", token, true).
+		Count(&count).Error
+	if err != nil {
+		return false, err
+	}
+
+	return count > 0, nil
+}
+
+// MarkEmailAsVerified marks a user's email as verified
+func (r *Repository) MarkEmailAsVerified(ctx context.Context, userID uuid.UUID) error {
+	result := r.db.WithContext(ctx).
+		Model(&database.User{}).
+		Where("id = ?", userID.String()).
+		Updates(map[string]interface{}{
+			"email_verified": true,
+		})
+
+	if result.Error != nil {
+		return result.Error
+	}
+
+	if result.RowsAffected == 0 {
+		return ErrNotFound
+	}
+
+	return nil
+}
+
+// UpdatePassword updates a user's password
+func (r *Repository) UpdatePassword(ctx context.Context, userID uuid.UUID, passwordHash string) error {
+	result := r.db.WithContext(ctx).
+		Model(&database.User{}).
+		Where("id = ?", userID.String()).
+		Update("password_hash", passwordHash)
+
+	if result.Error != nil {
+		return result.Error
+	}
+
+	if result.RowsAffected == 0 {
+		return ErrNotFound
+	}
+
+	return nil
+}
+
+// UpdateVerificationToken updates a user's verification token
+func (r *Repository) UpdateVerificationToken(ctx context.Context, userID uuid.UUID, token string) error {
+	result := r.db.WithContext(ctx).
+		Model(&database.User{}).
+		Where("id = ?", userID.String()).
+		Updates(map[string]interface{}{
+			"email_verification_token":   token,
+			"email_verification_sent_at": time.Now(),
+		})
+
+	if result.Error != nil {
+		return result.Error
+	}
+
+	if result.RowsAffected == 0 {
+		return ErrNotFound
+	}
+
+	return nil
+}
+
+// mapDBUserToModel converts a database user to a domain user model
+func mapDBUserToModel(dbUser *database.User) *User {
+	id, _ := uuid.Parse(dbUser.ID)
+	return &User{
+		ID:                        id,
+		Email:                     dbUser.Email,
+		PasswordHash:              dbUser.PasswordHash,
+		EmailVerified:             dbUser.EmailVerified,
+		EmailVerificationToken:    dbUser.EmailVerificationToken,
+		EmailVerificationSentAt:   dbUser.EmailVerificationSentAt,
+		CreatedAt:                 dbUser.CreatedAt,
+		UpdatedAt:                 dbUser.UpdatedAt,
+	}
+}
+
+// timePtr returns a pointer to a time.Time
+func timePtr(t time.Time) *time.Time {
+	return &t
+}

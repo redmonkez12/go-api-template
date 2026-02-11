@@ -1,0 +1,275 @@
+package user
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/google/uuid"
+)
+
+type Repository struct {
+	db *sql.DB
+}
+
+func NewRepository(db *sql.DB) *Repository {
+	return &Repository{db: db}
+}
+
+func (r *Repository) Create(ctx context.Context, email, passwordHash, verificationToken string) (*User, error) {
+	id := uuid.New()
+	now := time.Now()
+
+	query := `
+		INSERT INTO users (id, email, password_hash, email_verified, email_verification_token, email_verification_sent_at, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+	`
+
+	_, err := r.db.ExecContext(ctx, query, id.String(), email, passwordHash, false, verificationToken, now, now, now)
+	if err != nil {
+		if strings.Contains(err.Error(), "Duplicate entry") {
+			return nil, ErrDuplicateEmail
+		}
+		return nil, fmt.Errorf("failed to create user: %w", err)
+	}
+
+	return &User{
+		ID:                      id,
+		Email:                   email,
+		PasswordHash:            passwordHash,
+		EmailVerified:           false,
+		EmailVerificationToken:  &verificationToken,
+		EmailVerificationSentAt: &now,
+		CreatedAt:               now,
+		UpdatedAt:               now,
+	}, nil
+}
+
+func (r *Repository) GetByEmail(ctx context.Context, email string) (*User, error) {
+	query := `
+		SELECT id, email, password_hash, email_verified, email_verification_token, email_verification_sent_at, created_at, updated_at
+		FROM users
+		WHERE email = ?
+	`
+
+	var user User
+	var idStr string
+	var emailVerificationToken sql.NullString
+	var emailVerificationSentAt sql.NullTime
+
+	err := r.db.QueryRowContext(ctx, query, email).Scan(
+		&idStr,
+		&user.Email,
+		&user.PasswordHash,
+		&user.EmailVerified,
+		&emailVerificationToken,
+		&emailVerificationSentAt,
+		&user.CreatedAt,
+		&user.UpdatedAt,
+	)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("failed to get user by email: %w", err)
+	}
+
+	user.ID, err = uuid.Parse(idStr)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse user ID: %w", err)
+	}
+
+	if emailVerificationToken.Valid {
+		user.EmailVerificationToken = &emailVerificationToken.String
+	}
+	if emailVerificationSentAt.Valid {
+		user.EmailVerificationSentAt = &emailVerificationSentAt.Time
+	}
+
+	return &user, nil
+}
+
+func (r *Repository) GetByID(ctx context.Context, id uuid.UUID) (*User, error) {
+	query := `
+		SELECT id, email, password_hash, email_verified, email_verification_token, email_verification_sent_at, created_at, updated_at
+		FROM users
+		WHERE id = ?
+	`
+
+	var user User
+	var idStr string
+	var emailVerificationToken sql.NullString
+	var emailVerificationSentAt sql.NullTime
+
+	err := r.db.QueryRowContext(ctx, query, id.String()).Scan(
+		&idStr,
+		&user.Email,
+		&user.PasswordHash,
+		&user.EmailVerified,
+		&emailVerificationToken,
+		&emailVerificationSentAt,
+		&user.CreatedAt,
+		&user.UpdatedAt,
+	)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("failed to get user by ID: %w", err)
+	}
+
+	user.ID, err = uuid.Parse(idStr)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse user ID: %w", err)
+	}
+
+	if emailVerificationToken.Valid {
+		user.EmailVerificationToken = &emailVerificationToken.String
+	}
+	if emailVerificationSentAt.Valid {
+		user.EmailVerificationSentAt = &emailVerificationSentAt.Time
+	}
+
+	return &user, nil
+}
+
+func (r *Repository) GetByVerificationToken(ctx context.Context, token string) (*User, error) {
+	query := `
+		SELECT id, email, password_hash, email_verified, email_verification_token, email_verification_sent_at, created_at, updated_at
+		FROM users
+		WHERE email_verification_token = ?
+	`
+
+	var user User
+	var idStr string
+	var emailVerificationToken sql.NullString
+	var emailVerificationSentAt sql.NullTime
+
+	err := r.db.QueryRowContext(ctx, query, token).Scan(
+		&idStr,
+		&user.Email,
+		&user.PasswordHash,
+		&user.EmailVerified,
+		&emailVerificationToken,
+		&emailVerificationSentAt,
+		&user.CreatedAt,
+		&user.UpdatedAt,
+	)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("failed to get user by verification token: %w", err)
+	}
+
+	user.ID, err = uuid.Parse(idStr)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse user ID: %w", err)
+	}
+
+	if emailVerificationToken.Valid {
+		user.EmailVerificationToken = &emailVerificationToken.String
+	}
+	if emailVerificationSentAt.Valid {
+		user.EmailVerificationSentAt = &emailVerificationSentAt.Time
+	}
+
+	return &user, nil
+}
+
+func (r *Repository) CheckIfTokenAlreadyUsed(ctx context.Context, token string) (bool, error) {
+	query := `
+		SELECT email_verified
+		FROM users
+		WHERE email_verification_token = ?
+	`
+
+	var emailVerified bool
+	err := r.db.QueryRowContext(ctx, query, token).Scan(&emailVerified)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			// Token doesn't exist, so it's not in use
+			return false, nil
+		}
+		return false, fmt.Errorf("failed to check if token already used: %w", err)
+	}
+
+	// If email is verified and token still exists, it has been used
+	return emailVerified, nil
+}
+
+func (r *Repository) MarkEmailAsVerified(ctx context.Context, userID uuid.UUID) error {
+	query := `
+		UPDATE users
+		SET email_verified = ?, email_verification_token = NULL, updated_at = ?
+		WHERE id = ?
+	`
+
+	result, err := r.db.ExecContext(ctx, query, true, time.Now(), userID.String())
+	if err != nil {
+		return fmt.Errorf("failed to mark email as verified: %w", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to get rows affected: %w", err)
+	}
+
+	if rowsAffected == 0 {
+		return ErrNotFound
+	}
+
+	return nil
+}
+
+func (r *Repository) UpdatePassword(ctx context.Context, userID uuid.UUID, passwordHash string) error {
+	query := `
+		UPDATE users
+		SET password_hash = ?, updated_at = ?
+		WHERE id = ?
+	`
+
+	result, err := r.db.ExecContext(ctx, query, passwordHash, time.Now(), userID.String())
+	if err != nil {
+		return fmt.Errorf("failed to update password: %w", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to get rows affected: %w", err)
+	}
+
+	if rowsAffected == 0 {
+		return ErrNotFound
+	}
+
+	return nil
+}
+
+func (r *Repository) UpdateVerificationToken(ctx context.Context, userID uuid.UUID, token string) error {
+	query := `
+		UPDATE users
+		SET email_verification_token = ?, email_verification_sent_at = ?, updated_at = ?
+		WHERE id = ?
+	`
+
+	now := time.Now()
+	result, err := r.db.ExecContext(ctx, query, token, now, now, userID.String())
+	if err != nil {
+		return fmt.Errorf("failed to update verification token: %w", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to get rows affected: %w", err)
+	}
+
+	if rowsAffected == 0 {
+		return ErrNotFound
+	}
+
+	return nil
+}

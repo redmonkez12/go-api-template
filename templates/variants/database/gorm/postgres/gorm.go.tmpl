@@ -1,0 +1,45 @@
+package database
+
+import (
+	"log"
+	"time"
+
+	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
+)
+
+// NewGormDB creates and configures a new GORM database connection.
+func NewGormDB(dialector gorm.Dialector) (*gorm.DB, error) {
+	db, err := gorm.Open(dialector, &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Info),
+		NowFunc: func() time.Time {
+			return time.Now().UTC()
+		},
+		PrepareStmt:            true,
+		SkipDefaultTransaction: true,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// Get the underlying sql.DB to configure connection pool
+	sqlDB, err := db.DB()
+	if err != nil {
+		return nil, err
+	}
+
+	// Set connection pool settings
+	sqlDB.SetMaxIdleConns(10)
+	sqlDB.SetMaxOpenConns(100)
+	sqlDB.SetConnMaxLifetime(time.Hour)
+	sqlDB.SetConnMaxIdleTime(10 * time.Minute)
+
+	// Test the connection
+	if err := sqlDB.Ping(); err != nil {
+		return nil, err
+	}
+
+	log.Println("Database connection established successfully")
+
+	return db, nil
+}
