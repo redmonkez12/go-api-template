@@ -1,10 +1,27 @@
-.PHONY: help run build build-cli test docker-up docker-down migrate-up migrate-down migrate-create swagger docker-build docker-run docker-prod-run
+.PHONY: help setup run build build-cli test docker-up docker-down migrate-up migrate-down migrate-create swagger docker-build docker-run docker-prod-run
 
 help: ## Show this help message
 	@echo 'Usage: make [target]'
 	@echo ''
 	@echo 'Available targets:'
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-15s %s\n", $$1, $$2}'
+
+setup: ## First-time project setup (tools, Docker, migrations, Swagger)
+	@test -f .env || cp .env.example .env
+	@echo "==> Installing tools..."
+	@$(MAKE) install-tools
+	@echo "==> Downloading dependencies..."
+	@$(MAKE) deps
+	@echo "==> Starting Docker containers..."
+	@$(MAKE) docker-up
+	@echo "==> Waiting for services to be ready..."
+	@sleep 5
+	@echo "==> Running migrations..."
+	@$(MAKE) migrate-up
+	@echo "==> Generating Swagger docs..."
+	@$(MAKE) swagger
+	@echo ""
+	@echo "Setup complete! Run 'make run' to start the server."
 
 run: ## Run the application
 	go run cmd/api/main.go
@@ -20,13 +37,13 @@ test: ## Run tests
 	go tool cover -html=coverage.out -o coverage.html
 
 docker-up: ## Start Docker containers
-	docker-compose up -d
+	docker compose up -d
 
 docker-down: ## Stop Docker containers
-	docker-compose down
+	docker compose down
 
 docker-logs: ## View Docker container logs
-	docker-compose logs -f
+	docker compose logs -f
 
 migrate-up: ## Run database migrations up
 	@echo "Running migrations..."

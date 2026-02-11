@@ -112,17 +112,10 @@ func PrintSummary(cfg *generator.ProjectConfig) {
 func PrintSuccess(cfg *generator.ProjectConfig) {
 	fmt.Println(successStyle.Render("Project created successfully!"))
 	fmt.Println()
-	fmt.Println("Next steps:")
+	fmt.Println("Quick start:")
 	fmt.Printf("  cd %s\n", cfg.ProjectName)
-	fmt.Println("  cp .env.example .env")
-	fmt.Println("  # Edit .env with your configuration")
-	if cfg.Database != generator.DatabaseMongoDB {
-		fmt.Println("  make docker-up")
-		fmt.Println("  make migrate-up")
-	} else {
-		fmt.Println("  make docker-up")
-	}
-	fmt.Println("  make run")
+	fmt.Println("  make setup    # installs tools, starts Docker, runs migrations, generates Swagger")
+	fmt.Println("  make run      # starts the API server")
 	fmt.Println()
 }
 
