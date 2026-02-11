@@ -24,6 +24,8 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo/options"{{end}}
 	"github.com/redis/go-redis/v9"
 
+	_ "{{.ModuleName}}/docs"
+
 	"{{.ModuleName}}/internal/auth"
 	"{{.ModuleName}}/internal/config"
 	"{{.ModuleName}}/internal/email"
