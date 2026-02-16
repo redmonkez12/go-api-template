@@ -38,7 +38,7 @@ func SetupIndexes(db *mongo.Database) error {
 
 	// Unique index on email
 	_, err := usersCollection.Indexes().CreateOne(ctx, mongo.IndexModel{
-		Keys:    bson.D{{Key: "email", Value: 1}},
+		Keys:    bson.D{{"{{"}}Key: "email", Value: 1{{"}}"}},
 		Options: options.Index().SetUnique(true),
 	})
 	if err != nil {
@@ -47,19 +47,28 @@ func SetupIndexes(db *mongo.Database) error {
 
 	// Index on email_verification_token for faster lookups
 	_, err = usersCollection.Indexes().CreateOne(ctx, mongo.IndexModel{
-		Keys: bson.D{{Key: "email_verification_token", Value: 1}},
+		Keys: bson.D{{"{{"}}Key: "email_verification_token", Value: 1{{"}}"}},
 		Options: options.Index().SetSparse(true), // Only index non-null values
 	})
 	if err != nil {
 		return fmt.Errorf("failed to create index on users.email_verification_token: %w", err)
 	}
 
+{{if .HasOAuth}}	// Compound index on auth_provider + provider_user_id for OAuth lookups
+	_, err = usersCollection.Indexes().CreateOne(ctx, mongo.IndexModel{
+		Keys:    bson.D{{"{{"}}Key: "auth_provider", Value: 1}, {Key: "provider_user_id", Value: 1{{"}}"}},
+		Options: options.Index().SetUnique(true).SetSparse(true),
+	})
+	if err != nil {
+		return fmt.Errorf("failed to create compound index on users.auth_provider+provider_user_id: %w", err)
+	}
+{{end}}
 	// Refresh tokens collection indexes
 	refreshTokensCollection := db.Collection("refresh_tokens")
 
 	// Unique index on token_hash
 	_, err = refreshTokensCollection.Indexes().CreateOne(ctx, mongo.IndexModel{
-		Keys:    bson.D{{Key: "token_hash", Value: 1}},
+		Keys:    bson.D{{"{{"}}Key: "token_hash", Value: 1{{"}}"}},
 		Options: options.Index().SetUnique(true),
 	})
 	if err != nil {
@@ -68,7 +77,7 @@ func SetupIndexes(db *mongo.Database) error {
 
 	// Index on user_id for faster lookups when revoking all user tokens
 	_, err = refreshTokensCollection.Indexes().CreateOne(ctx, mongo.IndexModel{
-		Keys: bson.D{{Key: "user_id", Value: 1}},
+		Keys: bson.D{{"{{"}}Key: "user_id", Value: 1{{"}}"}},
 	})
 	if err != nil {
 		return fmt.Errorf("failed to create index on refresh_tokens.user_id: %w", err)
@@ -76,7 +85,7 @@ func SetupIndexes(db *mongo.Database) error {
 
 	// Index on expires_at for efficient cleanup of expired tokens
 	_, err = refreshTokensCollection.Indexes().CreateOne(ctx, mongo.IndexModel{
-		Keys: bson.D{{Key: "expires_at", Value: 1}},
+		Keys: bson.D{{"{{"}}Key: "expires_at", Value: 1{{"}}"}},
 	})
 	if err != nil {
 		return fmt.Errorf("failed to create index on refresh_tokens.expires_at: %w", err)

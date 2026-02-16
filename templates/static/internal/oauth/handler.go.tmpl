@@ -1,0 +1,123 @@
+package oauth
+
+import (
+	"errors"
+	"net/http"
+	"time"
+
+	"github.com/go-chi/chi/v5"
+
+	"go-api-template/internal/auth"
+	"go-api-template/internal/httputil"
+	"go-api-template/internal/logging"
+)
+
+// Handler handles OAuth HTTP requests.
+type Handler struct {
+	service          *Service
+	stateStore       *StateStore
+	logger           *logging.Logger
+	isProduction     bool
+	frontendURL      string
+	accessDuration   time.Duration
+	refreshDuration  time.Duration
+}
+
+// NewHandler creates a new OAuth handler.
+func NewHandler(
+	service *Service,
+	stateStore *StateStore,
+	logger *logging.Logger,
+	isProduction bool,
+	frontendURL string,
+	accessDuration time.Duration,
+	refreshDuration time.Duration,
+) *Handler {
+	return &Handler{
+		service:         service,
+		stateStore:      stateStore,
+		logger:          logger,
+		isProduction:    isProduction,
+		frontendURL:     frontendURL,
+		accessDuration:  accessDuration,
+		refreshDuration: refreshDuration,
+	}
+}
+
+// InitiateOAuth starts the OAuth flow by redirecting to the provider.
+func (h *Handler) InitiateOAuth(w http.ResponseWriter, r *http.Request) {
+	providerName := chi.URLParam(r, "provider")
+
+	state, err := h.stateStore.Generate(r.Context())
+	if err != nil {
+		h.logger.Error("failed to generate oauth state", "error", err)
+		httputil.RespondErrorWithCode(w, "Internal server error", httputil.CodeInternalError, http.StatusInternalServerError)
+		return
+	}
+
+	authURL, err := h.service.GetAuthURL(providerName, state)
+	if err != nil {
+		if errors.Is(err, ErrProviderNotFound) {
+			httputil.RespondErrorWithCode(w, "Unknown OAuth provider", httputil.CodeOAuthProviderNotFound, http.StatusBadRequest)
+			return
+		}
+		httputil.RespondErrorWithCode(w, "Internal server error", httputil.CodeInternalError, http.StatusInternalServerError)
+		return
+	}
+
+	http.Redirect(w, r, authURL, http.StatusTemporaryRedirect)
+}
+
+// OAuthCallback handles the OAuth provider callback.
+func (h *Handler) OAuthCallback(w http.ResponseWriter, r *http.Request) {
+	providerName := chi.URLParam(r, "provider")
+
+	// Validate state parameter
+	state := r.URL.Query().Get("state")
+	if state == "" {
+		httputil.RespondErrorWithCode(w, "Missing state parameter", httputil.CodeOAuthStateMismatch, http.StatusBadRequest)
+		return
+	}
+
+	valid, err := h.stateStore.Validate(r.Context(), state)
+	if err != nil || !valid {
+		httputil.RespondErrorWithCode(w, "Invalid or expired state", httputil.CodeOAuthStateMismatch, http.StatusBadRequest)
+		return
+	}
+
+	// Check for error from provider
+	if errParam := r.URL.Query().Get("error"); errParam != "" {
+		h.logger.Warn("oauth provider returned error", "provider", providerName, "error", errParam)
+		http.Redirect(w, r, h.frontendURL+"/auth/login?error=oauth_denied", http.StatusTemporaryRedirect)
+		return
+	}
+
+	code := r.URL.Query().Get("code")
+	if code == "" {
+		httputil.RespondErrorWithCode(w, "Missing authorization code", httputil.CodeOAuthExchangeFailed, http.StatusBadRequest)
+		return
+	}
+
+	tokens, err := h.service.HandleCallback(r.Context(), providerName, code)
+	if err != nil {
+		if errors.Is(err, ErrProviderNotFound) {
+			httputil.RespondErrorWithCode(w, "Unknown OAuth provider", httputil.CodeOAuthProviderNotFound, http.StatusBadRequest)
+			return
+		}
+		if errors.Is(err, ErrAccountConflict) {
+			http.Redirect(w, r, h.frontendURL+"/auth/login?error=account_exists", http.StatusTemporaryRedirect)
+			return
+		}
+		if errors.Is(err, ErrExchangeFailed) {
+			httputil.RespondErrorWithCode(w, "OAuth exchange failed", httputil.CodeOAuthExchangeFailed, http.StatusBadGateway)
+			return
+		}
+		h.logger.Error("oauth callback failed", "provider", providerName, "error", err)
+		httputil.RespondErrorWithCode(w, "Internal server error", httputil.CodeInternalError, http.StatusInternalServerError)
+		return
+	}
+
+	// Set auth cookies and redirect to frontend
+	auth.SetAuthCookies(w, tokens.AccessToken, tokens.RefreshToken, h.isProduction, h.accessDuration, h.refreshDuration)
+	http.Redirect(w, r, h.frontendURL+"/auth/callback", http.StatusTemporaryRedirect)
+}

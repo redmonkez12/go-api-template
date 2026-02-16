@@ -35,6 +35,7 @@ type ProjectConfig struct {
 	Database    Database
 	ORM         ORM
 	Auth        AuthToken
+	HasOAuth    bool
 }
 
 // DatabaseLabel returns a human-readable label.

@@ -20,7 +20,9 @@ type User struct {
 	EmailVerificationSentAt  *time.Time `bun:"email_verification_sent_at,type:datetime"`
 	CreatedAt                time.Time  `bun:"created_at,notnull,default:current_timestamp"`
 	UpdatedAt                time.Time  `bun:"updated_at,notnull,default:current_timestamp"`
-}
+{{if .HasOAuth}}	AuthProvider             string     `bun:"auth_provider,notnull,default:'local'"`
+	ProviderUserID           string     `bun:"provider_user_id"`
+{{end}}}
 
 var _ bun.BeforeAppendModelHook = (*User)(nil)
 

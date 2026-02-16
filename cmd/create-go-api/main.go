@@ -29,6 +29,7 @@ func main() {
 	createCmd.Flags().String("database", "", "Database (postgres, mysql, mongodb)")
 	createCmd.Flags().String("orm", "", "ORM/driver (bun, gorm, pgx, sqlraw, mongo)")
 	createCmd.Flags().String("auth", "", "Auth token strategy (paseto, jwt)")
+	createCmd.Flags().Bool("oauth", false, "Include OAuth support (Google, GitHub, Discord)")
 
 	rootCmd.AddCommand(createCmd)
 
@@ -47,8 +48,9 @@ func runCreate(cmd *cobra.Command, args []string) error {
 	database, _ := cmd.Flags().GetString("database")
 	orm, _ := cmd.Flags().GetString("orm")
 	auth, _ := cmd.Flags().GetString("auth")
+	oauth, _ := cmd.Flags().GetBool("oauth")
 
-	// If all flags are provided, run non-interactively
+	// If all required flags are provided, run non-interactively
 	if name != "" && module != "" && database != "" && orm != "" && auth != "" {
 		cfg := &generator.ProjectConfig{
 			ProjectName: name,
@@ -56,6 +58,7 @@ func runCreate(cmd *cobra.Command, args []string) error {
 			Database:    generator.Database(database),
 			ORM:         generator.ORM(orm),
 			Auth:        generator.AuthToken(auth),
+			HasOAuth:    oauth,
 		}
 
 		fmt.Printf("Generating project %q...\n", cfg.ProjectName)

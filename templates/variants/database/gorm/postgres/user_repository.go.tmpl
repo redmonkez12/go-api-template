@@ -5,7 +5,7 @@ import (
 	"errors"
 	"strings"
 
-	"go-api-template/internal/database"
+	"{{.ModuleName}}/internal/database"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -146,6 +146,41 @@ func (r *Repository) UpdateVerificationToken(ctx context.Context, userID uuid.UU
 	return nil
 }
 
+{{if .HasOAuth}}
+// CreateOAuthUser creates a new user from an OAuth provider.
+func (r *Repository) CreateOAuthUser(ctx context.Context, email, authProvider, providerUserID string) (*User, error) {
+	dbUser := &database.User{
+		Email:          email,
+		EmailVerified:  true,
+		AuthProvider:   authProvider,
+		ProviderUserID: providerUserID,
+	}
+
+	result := r.db.WithContext(ctx).Create(dbUser)
+	if result.Error != nil {
+		if isDuplicateKeyError(result.Error) {
+			return nil, ErrDuplicateEmail
+		}
+		return nil, result.Error
+	}
+
+	return mapDBUserToModel(dbUser), nil
+}
+
+// GetByProviderID retrieves a user by their OAuth provider and provider user ID.
+func (r *Repository) GetByProviderID(ctx context.Context, provider, providerUserID string) (*User, error) {
+	var dbUser database.User
+	result := r.db.WithContext(ctx).Where("auth_provider = ? AND provider_user_id = ?", provider, providerUserID).First(&dbUser)
+	if result.Error != nil {
+		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+			return nil, ErrNotFound
+		}
+		return nil, result.Error
+	}
+
+	return mapDBUserToModel(&dbUser), nil
+}
+{{end}}
 // mapDBUserToModel converts a database user model to a domain user model.
 func mapDBUserToModel(dbUser *database.User) *User {
 	return &User{
@@ -157,7 +192,9 @@ func mapDBUserToModel(dbUser *database.User) *User {
 		EmailVerificationSentAt: dbUser.EmailVerificationSentAt,
 		CreatedAt:               dbUser.CreatedAt,
 		UpdatedAt:               dbUser.UpdatedAt,
-	}
+{{if .HasOAuth}}		AuthProvider:            dbUser.AuthProvider,
+		ProviderUserID:          dbUser.ProviderUserID,
+{{end}}	}
 }
 
 // isDuplicateKeyError checks if the error is a duplicate key constraint violation.

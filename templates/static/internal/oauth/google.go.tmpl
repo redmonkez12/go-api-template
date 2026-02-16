@@ -1,0 +1,78 @@
+package oauth
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+
+	"golang.org/x/oauth2"
+	"golang.org/x/oauth2/google"
+)
+
+// GoogleProvider implements OAuth for Google.
+type GoogleProvider struct {
+	config *oauth2.Config
+}
+
+// NewGoogleProvider creates a new Google OAuth provider.
+func NewGoogleProvider(clientID, clientSecret, redirectURL string) *GoogleProvider {
+	return &GoogleProvider{
+		config: &oauth2.Config{
+			ClientID:     clientID,
+			ClientSecret: clientSecret,
+			RedirectURL:  redirectURL,
+			Scopes:       []string{"email", "profile"},
+			Endpoint:     google.Endpoint,
+		},
+	}
+}
+
+func (g *GoogleProvider) Name() string {
+	return "google"
+}
+
+func (g *GoogleProvider) AuthCodeURL(state string) string {
+	return g.config.AuthCodeURL(state, oauth2.AccessTypeOffline)
+}
+
+func (g *GoogleProvider) Exchange(ctx context.Context, code string) (*UserInfo, error) {
+	token, err := g.config.Exchange(ctx, code)
+	if err != nil {
+		return nil, fmt.Errorf("google token exchange failed: %w", err)
+	}
+
+	client := g.config.Client(ctx, token)
+	resp, err := client.Get("https://www.googleapis.com/oauth2/v2/userinfo")
+	if err != nil {
+		return nil, fmt.Errorf("failed to get google user info: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("google userinfo returned status %d", resp.StatusCode)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read google response: %w", err)
+	}
+
+	var googleUser struct {
+		ID      string `json:"id"`
+		Email   string `json:"email"`
+		Name    string `json:"name"`
+		Picture string `json:"picture"`
+	}
+	if err := json.Unmarshal(body, &googleUser); err != nil {
+		return nil, fmt.Errorf("failed to parse google user info: %w", err)
+	}
+
+	return &UserInfo{
+		Email:      googleUser.Email,
+		Name:       googleUser.Name,
+		AvatarURL:  googleUser.Picture,
+		ProviderID: googleUser.ID,
+	}, nil
+}

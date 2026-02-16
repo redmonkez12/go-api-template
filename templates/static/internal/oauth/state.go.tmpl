@@ -1,0 +1,55 @@
+package oauth
+
+import (
+	"context"
+	"crypto/rand"
+	"encoding/base64"
+	"fmt"
+	"time"
+
+	"github.com/redis/go-redis/v9"
+)
+
+const (
+	stateTTL    = 10 * time.Minute
+	statePrefix = "oauth_state:"
+)
+
+// StateStore manages OAuth CSRF state tokens in Redis.
+type StateStore struct {
+	client *redis.Client
+}
+
+// NewStateStore creates a new Redis-backed state store.
+func NewStateStore(client *redis.Client) *StateStore {
+	return &StateStore{client: client}
+}
+
+// Generate creates a new random state token and stores it in Redis.
+func (s *StateStore) Generate(ctx context.Context) (string, error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("failed to generate state: %w", err)
+	}
+	state := base64.URLEncoding.EncodeToString(b)
+
+	key := statePrefix + state
+	if err := s.client.Set(ctx, key, "1", stateTTL).Err(); err != nil {
+		return "", fmt.Errorf("failed to store state: %w", err)
+	}
+
+	return state, nil
+}
+
+// Validate checks if a state token exists and deletes it (single-use).
+func (s *StateStore) Validate(ctx context.Context, state string) (bool, error) {
+	key := statePrefix + state
+	result, err := s.client.GetDel(ctx, key).Result()
+	if err == redis.Nil {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("failed to validate state: %w", err)
+	}
+	return result == "1", nil
+}

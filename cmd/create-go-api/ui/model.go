@@ -17,6 +17,7 @@ func RunForm() (*generator.ProjectConfig, error) {
 		database    string
 		orm         string
 		auth        string
+		hasOAuth    bool
 	)
 
 	// Stage 1: Project info + database selection
@@ -54,6 +55,13 @@ func RunForm() (*generator.ProjectConfig, error) {
 					huh.NewOption("MongoDB", string(generator.DatabaseMongoDB)),
 				).
 				Value(&database),
+
+			huh.NewConfirm().
+				Title("Include OAuth? (Google, GitHub, Discord)").
+				Description("Adds OAuth login with configurable providers").
+				Affirmative("Yes").
+				Negative("No").
+				Value(&hasOAuth),
 		),
 	).WithTheme(huh.ThemeCatppuccin())
 
@@ -92,6 +100,7 @@ func RunForm() (*generator.ProjectConfig, error) {
 		Database:    db,
 		ORM:         generator.ORM(orm),
 		Auth:        generator.AuthToken(auth),
+		HasOAuth:    hasOAuth,
 	}
 
 	return cfg, nil
@@ -105,6 +114,11 @@ func PrintSummary(cfg *generator.ProjectConfig) {
 	fmt.Printf("  Database: %s\n", cfg.Database.Label())
 	fmt.Printf("  ORM:      %s\n", cfg.ORM.Label())
 	fmt.Printf("  Auth:     %s\n", cfg.Auth.Label())
+	if cfg.HasOAuth {
+		fmt.Printf("  OAuth:    Yes (Google, GitHub, Discord)\n")
+	} else {
+		fmt.Printf("  OAuth:    No\n")
+	}
 	fmt.Println()
 }
 

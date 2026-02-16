@@ -273,3 +273,84 @@ func (r *Repository) UpdateVerificationToken(ctx context.Context, userID uuid.UU
 
 	return nil
 }
+{{if .HasOAuth}}
+// CreateOAuthUser creates a new user from an OAuth provider
+func (r *Repository) CreateOAuthUser(ctx context.Context, email, authProvider, providerUserID string) (*User, error) {
+	id := uuid.New()
+	now := time.Now()
+
+	query := `
+		INSERT INTO users (id, email, email_verified, auth_provider, provider_user_id, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
+	`
+
+	_, err := r.db.ExecContext(ctx, query, id.String(), email, true, authProvider, providerUserID, now, now)
+	if err != nil {
+		if strings.Contains(err.Error(), "Duplicate entry") {
+			return nil, ErrDuplicateEmail
+		}
+		return nil, fmt.Errorf("failed to create oauth user: %w", err)
+	}
+
+	return &User{
+		ID:             id,
+		Email:          email,
+		EmailVerified:  true,
+		AuthProvider:   authProvider,
+		ProviderUserID: providerUserID,
+		CreatedAt:      now,
+		UpdatedAt:      now,
+	}, nil
+}
+
+// GetByProviderID retrieves a user by their OAuth provider and provider user ID
+func (r *Repository) GetByProviderID(ctx context.Context, provider, providerUserID string) (*User, error) {
+	query := `
+		SELECT id, email, password_hash, email_verified, email_verification_token, email_verification_sent_at, created_at, updated_at, auth_provider, provider_user_id
+		FROM users
+		WHERE auth_provider = ? AND provider_user_id = ?
+	`
+
+	var user User
+	var idStr string
+	var passwordHash sql.NullString
+	var emailVerificationToken sql.NullString
+	var emailVerificationSentAt sql.NullTime
+
+	err := r.db.QueryRowContext(ctx, query, provider, providerUserID).Scan(
+		&idStr,
+		&user.Email,
+		&passwordHash,
+		&user.EmailVerified,
+		&emailVerificationToken,
+		&emailVerificationSentAt,
+		&user.CreatedAt,
+		&user.UpdatedAt,
+		&user.AuthProvider,
+		&user.ProviderUserID,
+	)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("failed to get user by provider ID: %w", err)
+	}
+
+	user.ID, err = uuid.Parse(idStr)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse user ID: %w", err)
+	}
+
+	if passwordHash.Valid {
+		user.PasswordHash = passwordHash.String
+	}
+	if emailVerificationToken.Valid {
+		user.EmailVerificationToken = &emailVerificationToken.String
+	}
+	if emailVerificationSentAt.Valid {
+		user.EmailVerificationSentAt = &emailVerificationSentAt.Time
+	}
+
+	return &user, nil
+}
+{{end}}

@@ -7,7 +7,8 @@ import (
 	"{{.ModuleName}}/internal/auth"
 	"{{.ModuleName}}/internal/config"
 	"{{.ModuleName}}/internal/httputil"
-	"{{.ModuleName}}/internal/logging"
+	"{{.ModuleName}}/internal/logging"{{if .HasOAuth}}
+	"{{.ModuleName}}/internal/oauth"{{end}}
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -15,7 +16,7 @@ import (
 	httpSwagger "github.com/swaggo/http-swagger"
 )
 
-func NewRouter(cfg *config.Config, authHandler *auth.Handler, authMiddleware *auth.Middleware, logger *logging.Logger) *chi.Mux {
+func NewRouter(cfg *config.Config, authHandler *auth.Handler, authMiddleware *auth.Middleware, {{if .HasOAuth}}oauthHandler *oauth.Handler, {{end}}logger *logging.Logger) *chi.Mux {
 	r := chi.NewRouter()
 
 	if len(cfg.Server.TrustedOrigins) > 0 {
@@ -54,7 +55,12 @@ func NewRouter(cfg *config.Config, authHandler *auth.Handler, authMiddleware *au
 		r.Post("/forgot-password", authHandler.ForgotPassword)
 		r.Post("/reset-password", authHandler.ResetPassword)
 		r.Post("/resend-verification", authHandler.ResendVerificationEmail)
-	})
+{{if .HasOAuth}}
+		r.Route("/oauth", func(r chi.Router) {
+			r.Get("/{provider}/login", oauthHandler.InitiateOAuth)
+			r.Get("/{provider}/callback", oauthHandler.OAuthCallback)
+		})
+{{end}}	})
 
 	r.Group(func(r chi.Router) {
 		r.Use(authMiddleware.RequireAuth)

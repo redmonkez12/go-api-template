@@ -16,7 +16,8 @@ type Config struct {
 	Redis    RedisConfig
 	Auth     AuthConfig
 	Email    EmailConfig
-}
+{{if .HasOAuth}}	OAuth    OAuthConfig
+{{end}}}
 
 type ServerConfig struct {
 	Port            string
@@ -65,6 +66,17 @@ type EmailConfig struct {
 	SMTPPassword string
 	FrontendURL  string
 }
+{{if .HasOAuth}}
+type OAuthConfig struct {
+	GoogleClientID      string
+	GoogleClientSecret  string
+	GitHubClientID      string
+	GitHubClientSecret  string
+	DiscordClientID     string
+	DiscordClientSecret string
+	RedirectBaseURL     string
+}
+{{end}}
 
 func Load() (*Config, error) {
 	_ = godotenv.Load()
@@ -113,7 +125,16 @@ func Load() (*Config, error) {
 			SMTPPassword: getEnv("SMTP_PASS", ""),
 			FrontendURL:  getEnv("FRONTEND_URL", "http://localhost:3000"),
 		},
-	}
+{{if .HasOAuth}}		OAuth: OAuthConfig{
+			GoogleClientID:      getEnv("GOOGLE_CLIENT_ID", ""),
+			GoogleClientSecret:  getEnv("GOOGLE_CLIENT_SECRET", ""),
+			GitHubClientID:      getEnv("GITHUB_CLIENT_ID", ""),
+			GitHubClientSecret:  getEnv("GITHUB_CLIENT_SECRET", ""),
+			DiscordClientID:     getEnv("DISCORD_CLIENT_ID", ""),
+			DiscordClientSecret: getEnv("DISCORD_CLIENT_SECRET", ""),
+			RedirectBaseURL:     getEnv("OAUTH_REDIRECT_BASE_URL", "http://localhost:8080"),
+		},
+{{end}}	}
 
 	// Validate auth config
 {{if .IsPaseto}}	if len(cfg.Auth.PasetoKey) != 32 {

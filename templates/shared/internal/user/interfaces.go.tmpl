@@ -17,4 +17,6 @@ type RepositoryInterface interface {
 	MarkEmailAsVerified(ctx context.Context, userID uuid.UUID) error
 	UpdatePassword(ctx context.Context, userID uuid.UUID, passwordHash string) error
 	UpdateVerificationToken(ctx context.Context, userID uuid.UUID, token string) error
-}
+{{if .HasOAuth}}	CreateOAuthUser(ctx context.Context, email, authProvider, providerUserID string) (*User, error)
+	GetByProviderID(ctx context.Context, provider, providerUserID string) (*User, error)
+{{end}}}

@@ -21,7 +21,9 @@ type mongoUser struct {
 	EmailVerificationSentAt *time.Time `bson:"email_verification_sent_at,omitempty"`
 	CreatedAt               time.Time  `bson:"created_at"`
 	UpdatedAt               time.Time  `bson:"updated_at"`
-}
+{{if .HasOAuth}}	AuthProvider            string     `bson:"auth_provider"`
+	ProviderUserID          string     `bson:"provider_user_id,omitempty"`
+{{end}}}
 
 // Repository implements the RepositoryInterface using MongoDB.
 type Repository struct {
@@ -204,6 +206,51 @@ func (r *Repository) UpdateVerificationToken(ctx context.Context, userID uuid.UU
 	return nil
 }
 
+{{if .HasOAuth}}
+// CreateOAuthUser creates a new user from an OAuth provider.
+func (r *Repository) CreateOAuthUser(ctx context.Context, email, authProvider, providerUserID string) (*User, error) {
+	now := time.Now()
+	id := uuid.New()
+
+	doc := mongoUser{
+		ID:             id.String(),
+		Email:          email,
+		EmailVerified:  true,
+		AuthProvider:   authProvider,
+		ProviderUserID: providerUserID,
+		CreatedAt:      now,
+		UpdatedAt:      now,
+	}
+
+	_, err := r.collection().InsertOne(ctx, doc)
+	if err != nil {
+		if mongo.IsDuplicateKeyError(err) {
+			return nil, ErrDuplicateEmail
+		}
+		return nil, fmt.Errorf("failed to insert oauth user: %w", err)
+	}
+
+	return mapMongoUserToModel(&doc), nil
+}
+
+// GetByProviderID retrieves a user by their OAuth provider and provider user ID.
+func (r *Repository) GetByProviderID(ctx context.Context, provider, providerUserID string) (*User, error) {
+	var doc mongoUser
+	filter := bson.M{
+		"auth_provider":    provider,
+		"provider_user_id": providerUserID,
+	}
+	err := r.collection().FindOne(ctx, filter).Decode(&doc)
+	if err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("failed to find user by provider ID: %w", err)
+	}
+
+	return mapMongoUserToModel(&doc), nil
+}
+{{end}}
 // mapMongoUserToModel converts a MongoDB user document to the domain User model.
 func mapMongoUserToModel(doc *mongoUser) *User {
 	id, _ := uuid.Parse(doc.ID)
@@ -216,5 +263,7 @@ func mapMongoUserToModel(doc *mongoUser) *User {
 		EmailVerificationSentAt: doc.EmailVerificationSentAt,
 		CreatedAt:               doc.CreatedAt,
 		UpdatedAt:               doc.UpdatedAt,
-	}
+{{if .HasOAuth}}		AuthProvider:            doc.AuthProvider,
+		ProviderUserID:          doc.ProviderUserID,
+{{end}}	}
 }

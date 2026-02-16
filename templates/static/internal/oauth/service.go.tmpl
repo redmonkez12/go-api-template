@@ -1,0 +1,133 @@
+package oauth
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"time"
+
+	"github.com/google/uuid"
+
+	"go-api-template/internal/auth"
+	"go-api-template/internal/logging"
+	"go-api-template/internal/user"
+)
+
+var (
+	ErrProviderNotFound = errors.New("oauth provider not found")
+	ErrExchangeFailed   = errors.New("oauth exchange failed")
+	ErrAccountConflict  = errors.New("an account with this email already exists, please log in with your password")
+)
+
+// Service handles OAuth business logic.
+type Service struct {
+	providers            map[string]Provider
+	userRepo             user.RepositoryInterface
+	tokenService         auth.TokenService
+	authRepo             auth.RefreshTokenRepository
+	logger               *logging.Logger
+	accessTokenDuration  time.Duration
+	refreshTokenDuration time.Duration
+}
+
+// NewService creates a new OAuth service.
+func NewService(
+	providers map[string]Provider,
+	userRepo user.RepositoryInterface,
+	tokenService auth.TokenService,
+	authRepo auth.RefreshTokenRepository,
+	logger *logging.Logger,
+	accessTokenDuration time.Duration,
+	refreshTokenDuration time.Duration,
+) *Service {
+	return &Service{
+		providers:            providers,
+		userRepo:             userRepo,
+		tokenService:         tokenService,
+		authRepo:             authRepo,
+		logger:               logger,
+		accessTokenDuration:  accessTokenDuration,
+		refreshTokenDuration: refreshTokenDuration,
+	}
+}
+
+// GetAuthURL returns the authorization URL for a provider.
+func (s *Service) GetAuthURL(providerName, state string) (string, error) {
+	provider, ok := s.providers[providerName]
+	if !ok {
+		return "", ErrProviderNotFound
+	}
+	return provider.AuthCodeURL(state), nil
+}
+
+// HandleCallback processes the OAuth callback and returns auth tokens.
+func (s *Service) HandleCallback(ctx context.Context, providerName, code string) (*auth.AuthTokens, error) {
+	provider, ok := s.providers[providerName]
+	if !ok {
+		return nil, ErrProviderNotFound
+	}
+
+	// Exchange code for user info
+	userInfo, err := provider.Exchange(ctx, code)
+	if err != nil {
+		s.logger.Warn("oauth exchange failed", "provider", providerName, "error", err)
+		return nil, ErrExchangeFailed
+	}
+
+	// Try to find existing user by provider ID
+	existingUser, err := s.userRepo.GetByProviderID(ctx, providerName, userInfo.ProviderID)
+	if err != nil && !errors.Is(err, user.ErrNotFound) {
+		return nil, fmt.Errorf("failed to get user by provider ID: %w", err)
+	}
+
+	if existingUser != nil {
+		// Existing OAuth user — generate tokens
+		return s.generateTokens(ctx, existingUser.ID, existingUser.Email)
+	}
+
+	// Check if email is already registered with a different auth method
+	existingUser, err = s.userRepo.GetByEmail(ctx, userInfo.Email)
+	if err != nil && !errors.Is(err, user.ErrNotFound) {
+		return nil, fmt.Errorf("failed to check existing email: %w", err)
+	}
+
+	if existingUser != nil {
+		// Email exists with a different provider — conflict
+		return nil, ErrAccountConflict
+	}
+
+	// Create new OAuth user
+	newUser, err := s.userRepo.CreateOAuthUser(ctx, userInfo.Email, providerName, userInfo.ProviderID)
+	if err != nil {
+		if errors.Is(err, user.ErrDuplicateEmail) {
+			return nil, ErrAccountConflict
+		}
+		return nil, fmt.Errorf("failed to create oauth user: %w", err)
+	}
+
+	return s.generateTokens(ctx, newUser.ID, newUser.Email)
+}
+
+func (s *Service) generateTokens(ctx context.Context, userID uuid.UUID, email string) (*auth.AuthTokens, error) {
+	accessToken, err := s.tokenService.CreateToken(userID, email, s.accessTokenDuration)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create access token: %w", err)
+	}
+
+	refreshToken, err := auth.GenerateRandomToken()
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate refresh token: %w", err)
+	}
+
+	expiresAt := time.Now().Add(s.refreshTokenDuration)
+	if err := s.authRepo.StoreRefreshToken(ctx, userID, refreshToken, expiresAt); err != nil {
+		return nil, fmt.Errorf("failed to store refresh token: %w", err)
+	}
+
+	return &auth.AuthTokens{
+		AccessToken:  accessToken,
+		RefreshToken: refreshToken,
+		TokenType:    "Bearer",
+		ExpiresIn:    int64(s.accessTokenDuration.Seconds()),
+	}, nil
+}

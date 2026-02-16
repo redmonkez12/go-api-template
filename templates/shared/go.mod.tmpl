@@ -26,4 +26,5 @@ require (
 {{end}}{{if .IsPgx}}	github.com/jackc/pgx/v5 v5.8.0
 {{end}}{{if .IsMongo}}	go.mongodb.org/mongo-driver/v2 v2.5.0
 {{end}}{{if .IsSQLRaw}}	github.com/go-sql-driver/mysql v1.9.3
+{{end}}{{if .HasOAuth}}	golang.org/x/oauth2 v0.28.0
 {{end}})

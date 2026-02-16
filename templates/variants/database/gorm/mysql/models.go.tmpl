@@ -17,7 +17,9 @@ type User struct {
 	EmailVerificationSentAt   *time.Time `gorm:"column:email_verification_sent_at"`
 	CreatedAt                 time.Time  `gorm:"column:created_at;not null;default:CURRENT_TIMESTAMP"`
 	UpdatedAt                 time.Time  `gorm:"column:updated_at;not null;default:CURRENT_TIMESTAMP"`
-}
+{{if .HasOAuth}}	AuthProvider              string     `gorm:"column:auth_provider;type:varchar(20);not null;default:'local'"`
+	ProviderUserID            string     `gorm:"column:provider_user_id;type:varchar(255)"`
+{{end}}}
 
 // BeforeCreate hook generates UUID if not set
 func (u *User) BeforeCreate(tx *gorm.DB) error {

@@ -11,7 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/uptrace/bun"
 
-	"go-api-template/internal/database"
+	"{{.ModuleName}}/internal/database"
 )
 
 // Repository handles user data persistence
@@ -199,6 +199,50 @@ func (r *Repository) UpdateVerificationToken(ctx context.Context, userID uuid.UU
 	return nil
 }
 
+{{if .HasOAuth}}
+// CreateOAuthUser creates a new user from an OAuth provider
+func (r *Repository) CreateOAuthUser(ctx context.Context, email, authProvider, providerUserID string) (*User, error) {
+	dbUser := &database.User{
+		Email:          email,
+		EmailVerified:  true,
+		AuthProvider:   authProvider,
+		ProviderUserID: providerUserID,
+	}
+
+	_, err := r.db.NewInsert().
+		Model(dbUser).
+		Returning("*").
+		Exec(ctx)
+
+	if err != nil {
+		if strings.Contains(err.Error(), "duplicate key value violates unique constraint") {
+			return nil, ErrDuplicateEmail
+		}
+		return nil, fmt.Errorf("failed to create oauth user: %w", err)
+	}
+
+	return mapDBUserToModel(dbUser), nil
+}
+
+// GetByProviderID retrieves a user by their OAuth provider and provider user ID
+func (r *Repository) GetByProviderID(ctx context.Context, provider, providerUserID string) (*User, error) {
+	dbUser := new(database.User)
+	err := r.db.NewSelect().
+		Model(dbUser).
+		Where("auth_provider = ?", provider).
+		Where("provider_user_id = ?", providerUserID).
+		Scan(ctx)
+
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("failed to get user by provider ID: %w", err)
+	}
+
+	return mapDBUserToModel(dbUser), nil
+}
+{{end}}
 // mapDBUserToModel converts database model to domain model
 func mapDBUserToModel(dbu *database.User) *User {
 	return &User{
@@ -210,5 +254,7 @@ func mapDBUserToModel(dbu *database.User) *User {
 		EmailVerificationSentAt: dbu.EmailVerificationSentAt,
 		CreatedAt:               dbu.CreatedAt,
 		UpdatedAt:               dbu.UpdatedAt,
-	}
+{{if .HasOAuth}}		AuthProvider:            dbu.AuthProvider,
+		ProviderUserID:          dbu.ProviderUserID,
+{{end}}	}
 }

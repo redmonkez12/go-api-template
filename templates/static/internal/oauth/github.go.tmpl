@@ -1,0 +1,124 @@
+package oauth
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+
+	"golang.org/x/oauth2"
+)
+
+var githubEndpoint = oauth2.Endpoint{
+	AuthURL:  "https://github.com/login/oauth/authorize",
+	TokenURL: "https://github.com/login/oauth/access_token",
+}
+
+// GitHubProvider implements OAuth for GitHub.
+type GitHubProvider struct {
+	config *oauth2.Config
+}
+
+// NewGitHubProvider creates a new GitHub OAuth provider.
+func NewGitHubProvider(clientID, clientSecret, redirectURL string) *GitHubProvider {
+	return &GitHubProvider{
+		config: &oauth2.Config{
+			ClientID:     clientID,
+			ClientSecret: clientSecret,
+			RedirectURL:  redirectURL,
+			Scopes:       []string{"user:email", "read:user"},
+			Endpoint:     githubEndpoint,
+		},
+	}
+}
+
+func (g *GitHubProvider) Name() string {
+	return "github"
+}
+
+func (g *GitHubProvider) AuthCodeURL(state string) string {
+	return g.config.AuthCodeURL(state)
+}
+
+func (g *GitHubProvider) Exchange(ctx context.Context, code string) (*UserInfo, error) {
+	token, err := g.config.Exchange(ctx, code)
+	if err != nil {
+		return nil, fmt.Errorf("github token exchange failed: %w", err)
+	}
+
+	client := g.config.Client(ctx, token)
+
+	// Get user profile
+	resp, err := client.Get("https://api.github.com/user")
+	if err != nil {
+		return nil, fmt.Errorf("failed to get github user info: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("github user API returned status %d", resp.StatusCode)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read github response: %w", err)
+	}
+
+	var ghUser struct {
+		ID        int    `json:"id"`
+		Login     string `json:"login"`
+		Name      string `json:"name"`
+		AvatarURL string `json:"avatar_url"`
+		Email     string `json:"email"`
+	}
+	if err := json.Unmarshal(body, &ghUser); err != nil {
+		return nil, fmt.Errorf("failed to parse github user info: %w", err)
+	}
+
+	// If email is not public, fetch from emails endpoint
+	email := ghUser.Email
+	if email == "" {
+		email, err = g.fetchPrimaryEmail(ctx, client)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get github email: %w", err)
+		}
+	}
+
+	return &UserInfo{
+		Email:      email,
+		Name:       ghUser.Name,
+		AvatarURL:  ghUser.AvatarURL,
+		ProviderID: fmt.Sprintf("%d", ghUser.ID),
+	}, nil
+}
+
+func (g *GitHubProvider) fetchPrimaryEmail(ctx context.Context, client *http.Client) (string, error) {
+	resp, err := client.Get("https://api.github.com/user/emails")
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+
+	var emails []struct {
+		Email    string `json:"email"`
+		Primary  bool   `json:"primary"`
+		Verified bool   `json:"verified"`
+	}
+	if err := json.Unmarshal(body, &emails); err != nil {
+		return "", err
+	}
+
+	for _, e := range emails {
+		if e.Primary && e.Verified {
+			return e.Email, nil
+		}
+	}
+
+	return "", fmt.Errorf("no verified primary email found")
+}

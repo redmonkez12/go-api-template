@@ -19,7 +19,9 @@ type User struct {
 	EmailVerificationSentAt   *time.Time `bun:"email_verification_sent_at" json:"-"`
 	CreatedAt                 time.Time  `bun:"created_at,notnull,default:current_timestamp" json:"created_at"`
 	UpdatedAt                 time.Time  `bun:"updated_at,notnull,default:current_timestamp" json:"updated_at"`
-}
+{{if .HasOAuth}}	AuthProvider              string     `bun:"auth_provider,notnull,default:'local'" json:"auth_provider"`
+	ProviderUserID            string     `bun:"provider_user_id" json:"provider_user_id,omitempty"`
+{{end}}}
 
 // RefreshToken represents a refresh token in the database
 type RefreshToken struct {

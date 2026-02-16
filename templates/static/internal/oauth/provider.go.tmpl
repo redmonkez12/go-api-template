@@ -1,0 +1,18 @@
+package oauth
+
+import "context"
+
+// Provider defines the interface for an OAuth provider.
+type Provider interface {
+	Name() string
+	AuthCodeURL(state string) string
+	Exchange(ctx context.Context, code string) (*UserInfo, error)
+}
+
+// UserInfo holds user information retrieved from an OAuth provider.
+type UserInfo struct {
+	Email      string
+	Name       string
+	AvatarURL  string
+	ProviderID string
+}

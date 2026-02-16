@@ -22,24 +22,33 @@ func Generate(cfg *ProjectConfig) error {
 		return fmt.Errorf("create output directory: %w", err)
 	}
 
+	tplData := buildTemplateData(cfg)
+
 	// 1. Copy static files
 	if err := copyStatic(outDir, cfg); err != nil {
 		return fmt.Errorf("copy static files: %w", err)
 	}
 
 	// 2. Copy database variant files
-	if err := copyDatabaseVariant(outDir, cfg); err != nil {
+	if err := copyDatabaseVariant(outDir, cfg, tplData); err != nil {
 		return fmt.Errorf("copy database variant: %w", err)
 	}
 
 	// 3. Copy auth variant files
-	if err := copyAuthVariant(outDir, cfg); err != nil {
+	if err := copyAuthVariant(outDir, cfg, tplData); err != nil {
 		return fmt.Errorf("copy auth variant: %w", err)
 	}
 
 	// 4. Render shared templates
 	if err := renderTemplates(outDir, cfg); err != nil {
 		return fmt.Errorf("render templates: %w", err)
+	}
+
+	// 5. Copy OAuth files (if enabled)
+	if cfg.HasOAuth {
+		if err := copyOAuthFiles(outDir, cfg); err != nil {
+			return fmt.Errorf("copy oauth files: %w", err)
+		}
 	}
 
 	return nil
@@ -64,6 +73,15 @@ func copyStatic(outDir string, cfg *ProjectConfig) error {
 
 		// Calculate relative path (strip "static/" prefix)
 		rel, _ := filepath.Rel(root, path)
+
+		// Skip OAuth files during static copy — they are handled by copyOAuthFiles
+		if strings.HasPrefix(rel, filepath.Join("internal", "oauth")) {
+			if d.IsDir() {
+				return fs.SkipDir
+			}
+			return nil
+		}
+
 		rel = stripGoTmplExt(rel)
 		target := filepath.Join(outDir, rel)
 
@@ -89,7 +107,7 @@ func copyStatic(outDir string, cfg *ProjectConfig) error {
 }
 
 // copyDatabaseVariant copies the correct database variant files into the output project.
-func copyDatabaseVariant(outDir string, cfg *ProjectConfig) error {
+func copyDatabaseVariant(outDir string, cfg *ProjectConfig, tplData *TemplateData) error {
 	variantRoot := fmt.Sprintf("variants/database/%s/%s", cfg.ORM, cfg.Database)
 
 	return fs.WalkDir(templates.VariantsFS, variantRoot, func(path string, d fs.DirEntry, err error) error {
@@ -103,14 +121,14 @@ func copyDatabaseVariant(outDir string, cfg *ProjectConfig) error {
 			return nil
 		}
 
+		// Skip OAuth migration files when OAuth is disabled
+		if !cfg.HasOAuth && strings.Contains(rel, "oauth") {
+			return nil
+		}
+
 		data, err := fs.ReadFile(templates.VariantsFS, path)
 		if err != nil {
 			return fmt.Errorf("read %s: %w", path, err)
-		}
-
-		content := string(data)
-		if strings.HasSuffix(path, ".go.tmpl") {
-			content = rewriteImports(content, cfg.ModuleName)
 		}
 
 		// Determine target path based on filename conventions
@@ -118,12 +136,18 @@ func copyDatabaseVariant(outDir string, cfg *ProjectConfig) error {
 		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 			return err
 		}
-		return os.WriteFile(target, []byte(content), 0o644)
+
+		// Template-render .go.tmpl files; copy others as-is
+		if strings.HasSuffix(path, ".go.tmpl") {
+			return renderVariantTemplate(path, string(data), target, tplData)
+		}
+
+		return os.WriteFile(target, data, 0o644)
 	})
 }
 
 // copyAuthVariant copies the correct auth token variant files.
-func copyAuthVariant(outDir string, cfg *ProjectConfig) error {
+func copyAuthVariant(outDir string, cfg *ProjectConfig, tplData *TemplateData) error {
 	variantRoot := fmt.Sprintf("variants/auth/%s", cfg.Auth)
 
 	return fs.WalkDir(templates.VariantsFS, variantRoot, func(path string, d fs.DirEntry, err error) error {
@@ -142,16 +166,17 @@ func copyAuthVariant(outDir string, cfg *ProjectConfig) error {
 			return fmt.Errorf("read %s: %w", path, err)
 		}
 
-		content := string(data)
-		if strings.HasSuffix(path, ".go.tmpl") {
-			content = rewriteImports(content, cfg.ModuleName)
-		}
-
 		target := filepath.Join(outDir, "internal", "auth", rel)
 		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 			return err
 		}
-		return os.WriteFile(target, []byte(content), 0o644)
+
+		// Template-render .go.tmpl files; copy others as-is
+		if strings.HasSuffix(path, ".go.tmpl") {
+			return renderVariantTemplate(path, string(data), target, tplData)
+		}
+
+		return os.WriteFile(target, data, 0o644)
 	})
 }
 
@@ -249,6 +274,7 @@ type TemplateData struct {
 	IsPaseto   bool
 	IsJWT      bool
 	IsSQL      bool // true for Postgres and MySQL (not MongoDB)
+	HasOAuth   bool
 }
 
 func buildTemplateData(cfg *ProjectConfig) *TemplateData {
@@ -269,5 +295,55 @@ func buildTemplateData(cfg *ProjectConfig) *TemplateData {
 		IsPaseto:    cfg.Auth == AuthPaseto,
 		IsJWT:       cfg.Auth == AuthJWT,
 		IsSQL:       cfg.Database != DatabaseMongoDB,
+		HasOAuth:    cfg.HasOAuth,
 	}
+}
+
+// renderVariantTemplate parses and executes a Go template from a variant file.
+func renderVariantTemplate(srcPath, content, target string, tplData *TemplateData) error {
+	tmpl, err := template.New(srcPath).Parse(content)
+	if err != nil {
+		return fmt.Errorf("parse variant template %s: %w", srcPath, err)
+	}
+
+	f, err := os.Create(target)
+	if err != nil {
+		return fmt.Errorf("create %s: %w", target, err)
+	}
+	defer f.Close()
+
+	return tmpl.Execute(f, tplData)
+}
+
+// copyOAuthFiles copies OAuth provider files from templates/static/internal/oauth/.
+func copyOAuthFiles(outDir string, cfg *ProjectConfig) error {
+	root := "static/internal/oauth"
+	return fs.WalkDir(templates.StaticFS, root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+
+		rel, _ := filepath.Rel(root, path)
+		rel = stripGoTmplExt(rel)
+		target := filepath.Join(outDir, "internal", "oauth", rel)
+
+		if d.IsDir() {
+			return os.MkdirAll(target, 0o755)
+		}
+
+		data, err := fs.ReadFile(templates.StaticFS, path)
+		if err != nil {
+			return fmt.Errorf("read %s: %w", path, err)
+		}
+
+		content := string(data)
+		if strings.HasSuffix(path, ".go.tmpl") {
+			content = rewriteImports(content, cfg.ModuleName)
+		}
+
+		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+			return err
+		}
+		return os.WriteFile(target, []byte(content), 0o644)
+	})
 }

@@ -105,7 +105,7 @@ func (s *Service) Register(ctx context.Context, email, password string) (*user.U
 	}
 
 	// Generate verification token
-	verificationToken, err := generateRandomToken()
+	verificationToken, err := GenerateRandomToken()
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate verification token: %w", err)
 	}
@@ -257,7 +257,7 @@ func (s *Service) generateTokens(ctx context.Context, userID uuid.UUID, email st
 	}
 
 	// Generate refresh token (long-lived, random string)
-	refreshToken, err := generateRandomToken()
+	refreshToken, err := GenerateRandomToken()
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate refresh token: %w", err)
 	}
@@ -354,8 +354,8 @@ func (s *Service) verifyPassword(encodedHash, password string) bool {
 	return subtle.ConstantTimeCompare(decodedHash, inputHash) == 1
 }
 
-// generateRandomToken creates a cryptographically secure random token
-func generateRandomToken() (string, error) {
+// GenerateRandomToken creates a cryptographically secure random token
+func GenerateRandomToken() (string, error) {
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {
 		return "", err
@@ -379,7 +379,7 @@ func (s *Service) RequestPasswordReset(ctx context.Context, email string) error 
 	}
 
 	// Generate password reset token
-	token, err := generateRandomToken()
+	token, err := GenerateRandomToken()
 	if err != nil {
 		s.logger.Warn("failed to generate password reset token", "error", err)
 		return nil
@@ -467,7 +467,7 @@ func (s *Service) ResendVerificationEmail(ctx context.Context, email string) err
 	}
 
 	// Generate new verification token
-	token, err := generateRandomToken()
+	token, err := GenerateRandomToken()
 	if err != nil {
 		s.logger.Warn("failed to generate verification token", "error", err)
 		return nil
