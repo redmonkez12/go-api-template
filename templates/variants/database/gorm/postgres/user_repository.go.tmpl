@@ -89,25 +89,13 @@ func (r *Repository) CheckIfTokenAlreadyUsed(ctx context.Context, token string) 
 	var count int64
 	result := r.db.WithContext(ctx).
 		Model(&database.User{}).
-		Where("email_verification_token IS NULL AND email_verified = ?", true).
+		Where("email_verification_token = ? AND email_verified = ?", token, true).
 		Count(&count)
 	if result.Error != nil {
 		return false, result.Error
 	}
 
-	// If we can't find the user by token but they exist with verified email,
-	// the token was already used
-	var tokenExists int64
-	result = r.db.WithContext(ctx).
-		Model(&database.User{}).
-		Where("email_verification_token = ?", token).
-		Count(&tokenExists)
-	if result.Error != nil {
-		return false, result.Error
-	}
-
-	// Token is used if it doesn't exist anymore in the database
-	return tokenExists == 0, nil
+	return count > 0, nil
 }
 
 // MarkEmailAsVerified marks a user's email as verified.

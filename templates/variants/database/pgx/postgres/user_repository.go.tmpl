@@ -172,13 +172,12 @@ func (r *Repository) CheckIfTokenAlreadyUsed(ctx context.Context, token string) 
 	query := `
 		SELECT COUNT(*)
 		FROM users
-		WHERE email_verification_token IS NULL
+		WHERE email_verification_token = $1
 		AND email_verified = true
-		AND email_verification_sent_at IS NOT NULL
 	`
 
 	var count int
-	err := r.pool.QueryRow(ctx, query).Scan(&count)
+	err := r.pool.QueryRow(ctx, query, token).Scan(&count)
 	if err != nil {
 		return false, fmt.Errorf("failed to check if token already used: %w", err)
 	}

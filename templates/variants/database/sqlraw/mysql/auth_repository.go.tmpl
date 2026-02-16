@@ -117,7 +117,7 @@ func (r *RefreshTokenRepo) RevokeAllUserTokens(ctx context.Context, userID uuid.
 func (r *RefreshTokenRepo) CleanupExpiredTokens(ctx context.Context) error {
 	query := `
 		DELETE FROM refresh_tokens
-		WHERE expires_at < ? OR revoked_at IS NOT NULL
+		WHERE expires_at < ?
 	`
 
 	_, err := r.db.ExecContext(ctx, query, time.Now())

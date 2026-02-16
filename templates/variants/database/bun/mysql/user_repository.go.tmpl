@@ -39,14 +39,16 @@ func mapDBUserToModel(dbUser *database.User) *User {
 
 // Create creates a new user
 func (r *Repository) Create(ctx context.Context, email, passwordHash, verificationToken string) (*User, error) {
+	now := time.Now()
 	dbUser := &database.User{
-		ID:                     uuid.New().String(),
-		Email:                  email,
-		PasswordHash:           passwordHash,
-		EmailVerificationToken: &verificationToken,
-		EmailVerified:          false,
-		CreatedAt:              time.Now(),
-		UpdatedAt:              time.Now(),
+		ID:                      uuid.New().String(),
+		Email:                   email,
+		PasswordHash:            passwordHash,
+		EmailVerificationToken:  &verificationToken,
+		EmailVerificationSentAt: &now,
+		EmailVerified:           false,
+		CreatedAt:               now,
+		UpdatedAt:               now,
 	}
 
 	_, err := r.db.NewInsert().
