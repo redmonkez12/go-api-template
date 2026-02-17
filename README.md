@@ -1,5 +1,7 @@
 # Go API Template
 
+[![CI](https://github.com/redmonkez12/go-api-template/actions/workflows/ci.yml/badge.svg)](https://github.com/redmonkez12/go-api-template/actions/workflows/ci.yml) [![Docker](https://github.com/redmonkez12/go-api-template/actions/workflows/docker.yml/badge.svg)](https://github.com/redmonkez12/go-api-template/actions/workflows/docker.yml)
+
 A production-ready Go REST API template with batteries included: authentication, email verification, observability, and more.
 
 ## What's Included

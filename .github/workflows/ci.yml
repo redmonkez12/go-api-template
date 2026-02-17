@@ -76,6 +76,10 @@ jobs:
             --orm ${{ matrix.orm }} \
             --auth ${{ matrix.auth }}
 
+      - name: Download dependencies
+        working-directory: test-project
+        run: go mod tidy
+
       - name: Build generated project
         working-directory: test-project
         run: go build ./...
