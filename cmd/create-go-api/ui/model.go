@@ -124,12 +124,23 @@ func PrintSummary(cfg *generator.ProjectConfig) {
 
 // PrintSuccess prints the success message with next steps.
 func PrintSuccess(cfg *generator.ProjectConfig) {
-	fmt.Println(successStyle.Render("Project created successfully!"))
+	fmt.Println(SuccessStyle.Render("Project created successfully!"))
 	fmt.Println()
 	fmt.Println("Quick start:")
 	fmt.Printf("  cd %s\n", cfg.ProjectName)
 	fmt.Println("  make setup    # installs tools, starts Docker, runs migrations, generates Swagger")
 	fmt.Println("  make run      # starts the API server")
+	fmt.Println()
+}
+
+// PrintAddOAuthSuccess prints the success message after adding OAuth.
+func PrintAddOAuthSuccess() {
+	fmt.Println(SuccessStyle.Render("OAuth added successfully!"))
+	fmt.Println()
+	fmt.Println("Next steps:")
+	fmt.Println("  1. Run migrations:  make migrate-up")
+	fmt.Println("  2. Add OAuth env vars to .env (see .env.example for reference)")
+	fmt.Println("  3. Regenerate Swagger docs:  make swagger")
 	fmt.Println()
 }
 

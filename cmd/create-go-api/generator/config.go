@@ -1,5 +1,15 @@
 package generator
 
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+)
+
+// ConfigFileName is the name of the JSON config file saved in generated projects.
+const ConfigFileName = ".go-api-template.json"
+
 // Database represents a supported database engine.
 type Database string
 
@@ -30,12 +40,39 @@ const (
 
 // ProjectConfig holds all user selections for project generation.
 type ProjectConfig struct {
-	ProjectName string
-	ModuleName  string
-	Database    Database
-	ORM         ORM
-	Auth        AuthToken
-	HasOAuth    bool
+	ProjectName string    `json:"project_name"`
+	ModuleName  string    `json:"module_name"`
+	Database    Database  `json:"database"`
+	ORM         ORM       `json:"orm"`
+	Auth        AuthToken `json:"auth"`
+	HasOAuth    bool      `json:"has_oauth"`
+}
+
+// SaveToFile writes the config as JSON to ConfigFileName in the given directory.
+func (c *ProjectConfig) SaveToFile(dir string) error {
+	data, err := json.MarshalIndent(c, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal config: %w", err)
+	}
+	path := filepath.Join(dir, ConfigFileName)
+	if err := os.WriteFile(path, append(data, '\n'), 0o644); err != nil {
+		return fmt.Errorf("write config file: %w", err)
+	}
+	return nil
+}
+
+// LoadConfigFromFile reads ProjectConfig from ConfigFileName in the given directory.
+func LoadConfigFromFile(dir string) (*ProjectConfig, error) {
+	path := filepath.Join(dir, ConfigFileName)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read config file: %w", err)
+	}
+	var cfg ProjectConfig
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return nil, fmt.Errorf("parse config file: %w", err)
+	}
+	return &cfg, nil
 }
 
 // DatabaseLabel returns a human-readable label.

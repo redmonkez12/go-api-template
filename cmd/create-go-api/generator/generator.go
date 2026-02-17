@@ -11,13 +11,24 @@ import (
 	"github.com/redmonkez12/go-api-template/templates"
 )
 
-// Generate creates a new project from the templates using the given config.
+// Generate creates a new project from the templates using the given config,
+// saves the config file, and writes to a directory named after the project.
 func Generate(cfg *ProjectConfig) error {
+	outDir := cfg.ProjectName
+	if err := GenerateTo(outDir, cfg); err != nil {
+		return err
+	}
+	return cfg.SaveToFile(outDir)
+}
+
+// GenerateTo creates a new project in the specified output directory.
+// Unlike Generate, it does not save a config file, making it suitable
+// for generating temporary projects (e.g., for diff-based patching).
+func GenerateTo(outDir string, cfg *ProjectConfig) error {
 	if err := ValidateConfig(cfg); err != nil {
 		return fmt.Errorf("invalid config: %w", err)
 	}
 
-	outDir := cfg.ProjectName
 	if err := os.MkdirAll(outDir, 0o755); err != nil {
 		return fmt.Errorf("create output directory: %w", err)
 	}

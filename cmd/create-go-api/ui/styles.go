@@ -8,7 +8,8 @@ var (
 			Foreground(lipgloss.Color("63")).
 			MarginBottom(1)
 
-	successStyle = lipgloss.NewStyle().
+	// SuccessStyle is exported for use in add-oauth and other command output.
+	SuccessStyle = lipgloss.NewStyle().
 			Bold(true).
 			Foreground(lipgloss.Color("42"))
 

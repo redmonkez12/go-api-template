@@ -31,7 +31,21 @@ func main() {
 	createCmd.Flags().String("auth", "", "Auth token strategy (paseto, jwt)")
 	createCmd.Flags().Bool("oauth", false, "Include OAuth support (Google, GitHub, Discord)")
 
-	rootCmd.AddCommand(createCmd)
+	// add command group
+	addCmd := &cobra.Command{
+		Use:   "add",
+		Short: "Add features to an existing project",
+	}
+
+	addOAuthCmd := &cobra.Command{
+		Use:   "oauth",
+		Short: "Add OAuth support (Google, GitHub, Discord) to an existing project",
+		RunE:  runAddOAuth,
+	}
+	addOAuthCmd.Flags().BoolP("yes", "y", false, "Skip confirmation prompt")
+
+	addCmd.AddCommand(addOAuthCmd)
+	rootCmd.AddCommand(createCmd, addCmd)
 
 	// Allow running without subcommand (default to create)
 	rootCmd.RunE = createCmd.RunE
@@ -40,6 +54,35 @@ func main() {
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
 	}
+}
+
+func runAddOAuth(cmd *cobra.Command, args []string) error {
+	yes, _ := cmd.Flags().GetBool("yes")
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("get working directory: %w", err)
+	}
+
+	if !yes {
+		fmt.Println("This will add OAuth support (Google, GitHub, Discord) to your project.")
+		fmt.Print("Continue? [y/N] ")
+		var answer string
+		fmt.Scanln(&answer)
+		if answer != "y" && answer != "Y" {
+			fmt.Println("Aborted.")
+			return nil
+		}
+	}
+
+	fmt.Println("Adding OAuth support...")
+	if err := generator.AddOAuth(cwd); err != nil {
+		ui.PrintError(err.Error())
+		return err
+	}
+
+	ui.PrintAddOAuthSuccess()
+	return nil
 }
 
 func runCreate(cmd *cobra.Command, args []string) error {
